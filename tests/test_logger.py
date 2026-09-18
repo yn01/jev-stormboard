@@ -72,13 +72,38 @@ def test_随時フィードは全件が保存対象():
     assert all(should_save(e) for e in entries)
 
 
-def test_定時フィードは警報級の可能性だけが保存対象():
+def test_定時フィードも初期値では全件が保存対象():
+    from logger import config
+
+    # 初期値はフィルタなし
+    assert config.REGULAR_TITLE_INCLUDES == ()
+
+    entries = load("regular_sample.xml", "regular")
+    assert len(entries) == 5
+    assert all(should_save(e) for e in entries)
+
+
+def test_定時フィードはINCLUDESを設定すると絞り込める(monkeypatch):
+    from logger import config, feed
+
+    monkeypatch.setattr(config, "REGULAR_TITLE_INCLUDES", ("警報級の可能性",))
+    monkeypatch.setattr(feed.config, "REGULAR_TITLE_INCLUDES", ("警報級の可能性",))
+
     entries = load("regular_sample.xml", "regular")
     kept = [e for e in entries if should_save(e)]
 
-    assert len(entries) == 5
     assert len(kept) == 2
     assert all("警報級の可能性" in e.title for e in kept)
+
+
+def test_INCLUDESを設定しても随時フィードは絞り込まれない(monkeypatch):
+    from logger import config, feed
+
+    monkeypatch.setattr(config, "REGULAR_TITLE_INCLUDES", ("警報級の可能性",))
+    monkeypatch.setattr(feed.config, "REGULAR_TITLE_INCLUDES", ("警報級の可能性",))
+
+    entries = load("extra_sample.xml", "extra")
+    assert all(should_save(e) for e in entries)
 
 
 def test_除外リストで種類を落とせる(monkeypatch):
@@ -207,3 +232,66 @@ def test_statsが種類別の件数を集計する(tmp_path: Path):
     text = render(summary)
     assert "保存件数: 4件" in text
     assert entries[0].title in text
+
+
+# ---------------------------------------------------------------- 無着信の警告
+
+
+def test_新着があるうちは警告しない(tmp_path: Path, caplog):
+    from logger.__main__ import NoNewEntryWatch
+
+    store = Store(raw_dir=tmp_path / "raw", index_path=tmp_path / "index.jsonl")
+    store.save(load("extra_sample.xml", "extra")[0], b"body")
+
+    watch = NoNewEntryWatch(store)
+    with caplog.at_level("WARNING"):
+        watch.check()
+    assert caplog.records == []
+
+
+def test_新着が30分途切れると警告する(tmp_path: Path, caplog):
+    from datetime import datetime, timedelta, timezone
+
+    from logger.__main__ import NoNewEntryWatch
+
+    store = Store(raw_dir=tmp_path / "raw", index_path=tmp_path / "index.jsonl")
+    store.save(load("extra_sample.xml", "extra")[0], b"body")
+    watch = NoNewEntryWatch(store)
+
+    # 最後の新着が 31 分前だったことにする
+    store.last_new_at["extra"] = datetime.now(timezone.utc) - timedelta(minutes=31)
+
+    with caplog.at_level("WARNING"):
+        watch.check()
+    assert len(caplog.records) == 1
+    assert "新着が" in caplog.records[0].getMessage()
+
+    # 続けて呼んでも連発しない
+    with caplog.at_level("WARNING"):
+        watch.check()
+    assert len(caplog.records) == 1
+
+
+def test_索引から最終新着時刻を復元する(tmp_path: Path):
+    raw, index = tmp_path / "raw", tmp_path / "index.jsonl"
+    entries = load("extra_sample.xml", "extra")
+
+    first = Store(raw_dir=raw, index_path=index)
+    record = first.save(entries[0], b"body")
+    assert record is not None
+
+    # 再起動しても、随時フィードの最終新着時刻を引き継ぐ
+    second = Store(raw_dir=raw, index_path=index)
+    assert "extra" in second.last_new_at
+    assert second.last_new_at["extra"].isoformat() == record["fetched_at"]
+
+
+def test_statsが経過時間を表示する(tmp_path: Path):
+    from logger.stats import load_records, render, summarize
+
+    store = Store(raw_dir=tmp_path / "raw", index_path=tmp_path / "index.jsonl")
+    store.save(load("extra_sample.xml", "extra")[0], b"x" * 10)
+
+    text = render(summarize(load_records(tmp_path / "index.jsonl")))
+    assert "最終の新着からの経過時間:" in text
+    assert "extra" in text
