@@ -20,7 +20,7 @@ from logging.handlers import RotatingFileHandler
 import httpx
 
 from . import config
-from .feed import Entry, parse_feed, should_save
+from .feed import JST, Entry, parse_feed, should_save
 from .http import Fetcher, NotModified
 from .store import Store
 
@@ -138,6 +138,41 @@ def poll_feed(feed: config.Feed, fetcher: Fetcher, store: Store) -> None:
         )
 
 
+class NoNewEntryWatch:
+    """随時フィードの新着が途切れていないかを見張る。
+
+    気象庁側が静かなだけのこともあるが、取得が止まっていることに気づくための
+    目安として WARNING を出す。
+    """
+
+    def __init__(self, store: Store) -> None:
+        self._store = store
+        # 索引に記録が無ければ、起動時刻を起点にする
+        self._started = datetime.now(timezone.utc)
+        self._last_warned: datetime | None = None
+
+    def last_new_at(self) -> datetime:
+        return self._store.last_new_at.get("extra", self._started)
+
+    def check(self) -> None:
+        now = datetime.now(timezone.utc)
+        silent = (now - self.last_new_at()).total_seconds()
+        if silent < config.NO_NEW_ENTRY_WARN_SEC:
+            return
+        if (
+            self._last_warned is not None
+            and (now - self._last_warned).total_seconds() < config.NO_NEW_ENTRY_REPEAT_SEC
+        ):
+            return
+        log.warning(
+            "随時フィードの新着が %.0f分ありません (最終新着 %s JST)。"
+            "気象庁側が静かなだけの可能性もありますが、取得が止まっていないか確認してください",
+            silent / 60,
+            self.last_new_at().astimezone(JST).strftime("%m-%d %H:%M:%S"),
+        )
+        self._last_warned = now
+
+
 def run() -> int:
     setup_logging()
     signal.signal(signal.SIGINT, _handle_signal)
@@ -145,6 +180,7 @@ def run() -> int:
 
     store = Store()
     log.info("ロガーを起動しました (保存済み %d件)", store.seen_count)
+    watch = NoNewEntryWatch(store)
 
     high = [f for f in config.FEEDS if f.kind == "high"]
     long = [f for f in config.FEEDS if f.kind == "long"]
@@ -167,6 +203,8 @@ def run() -> int:
                 if _stop.is_set():
                     break
                 poll_feed(feed, fetcher, store)
+
+            watch.check()
 
             # 処理にかかった時間を差し引いて待つ
             elapsed = time.monotonic() - started

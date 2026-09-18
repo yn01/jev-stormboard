@@ -23,18 +23,21 @@ class Store:
         self.index_path = index_path or config.PATHS.index
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         self.index_path.parent.mkdir(parents=True, exist_ok=True)
-        self._seen: set[str] = self._load_seen()
+        self._seen: set[str] = set()
+        # フィード別の「最後に新規保存した時刻」。無着信の判定に使う
+        self.last_new_at: dict[str, datetime] = {}
+        self._load_seen()
 
     # ------------------------------------------------------------ 重複排除
 
-    def _load_seen(self) -> set[str]:
-        """index.jsonl から保存済みの id を読み込む(再起動時の復元)。
+    def _load_seen(self) -> None:
+        """index.jsonl から保存済みの id と、フィード別の最終新着時刻を読み込む。
 
-        途中で落ちて壊れた行があっても、その行だけを飛ばす。
+        再起動しても続きから保存できるようにするための復元処理。途中で落ちて
+        壊れた行があっても、その行だけを飛ばす。
         """
-        seen: set[str] = set()
         if not self.index_path.exists():
-            return seen
+            return
         with self.index_path.open(encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
@@ -45,9 +48,24 @@ class Store:
                 except json.JSONDecodeError:
                     continue
                 entry_id = record.get("id")
-                if entry_id:
-                    seen.add(entry_id)
-        return seen
+                if not entry_id:
+                    continue
+                self._seen.add(entry_id)
+                self._remember_new(record)
+
+    def _remember_new(self, record: dict) -> None:
+        """フィード別の最終新着時刻(fetched_at)を更新する。"""
+        feed = record.get("feed")
+        fetched = record.get("fetched_at")
+        if not feed or not fetched:
+            return
+        try:
+            at = datetime.fromisoformat(fetched)
+        except ValueError:
+            return
+        current = self.last_new_at.get(feed)
+        if current is None or at > current:
+            self.last_new_at[feed] = at
 
     def has(self, entry_id: str) -> bool:
         return entry_id in self._seen
@@ -88,6 +106,7 @@ class Store:
 
         self._append_index(record)
         self._seen.add(entry.id)
+        self._remember_new(record)
         return record
 
     def _relative(self, path: Path) -> str:
