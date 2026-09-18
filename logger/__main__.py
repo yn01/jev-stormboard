@@ -50,6 +50,10 @@ def setup_logging() -> None:
     root.addHandler(file_handler)
     root.addHandler(stream_handler)
 
+    # httpx は 1 リクエストごとに INFO を出すため、ログが電文の記録で埋まらないよう落とす
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 
 def _handle_signal(signum: int, _frame: object) -> None:
     log.info("シグナル %s を受信。安全に終了します", signal.Signals(signum).name)
