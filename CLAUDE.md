@@ -5,6 +5,8 @@
 判定させる Streamlit デモアプリ。**実際の防災判断には使わないデモ**である。
 
 - 第一段階(いま): 電文を保存し続けるロガー。`python -m logger`
+  - 保存対象は、随時・定時フィードとも**全エントリ**(地震火山とその他は取得しない)。
+    種類で絞る場合は `logger/config.py` の `REGULAR_TITLE_INCLUDES` / `TITLE_EXCLUDES`。
 - 次の段階: Streamlit アプリ本体と Jev の呼び出し、リプレイ機能
 
 ## ディレクトリ構成
@@ -37,6 +39,10 @@ python -m logger.stats            # 保存状況の確認
 python -m pytest                  # テスト
 du -sh data/                      # 容量確認
 ```
+
+## 気づくための仕組み
+- 随時フィードの新着が 30分以上途切れると、ログに WARNING が出る。
+- `python -m logger.stats` の「最終の新着からの経過時間」で稼働状況を確認する。
 
 ## Git の運用
 - ブランチは `main`。リモートは GitHub `yn01/jev-stormboard`(private)。

@@ -45,9 +45,16 @@ caffeinate -i python -m logger
 | フィード | 保存対象 |
 | --- | --- |
 | 随時 (`extra.xml` / `extra_l.xml`) | **全エントリ** |
-| 定時 (`regular.xml` / `regular_l.xml`) | title に「警報級の可能性」を含むものだけ |
+| 定時 (`regular.xml` / `regular_l.xml`) | **全エントリ** |
 
 地震火山フィードとその他フィードは取得しません。
+
+定時フィードを種類で絞りたい場合は、`logger/config.py` の `REGULAR_TITLE_INCLUDES`
+に文字列を並べてください(部分一致、いずれかに当たれば保存)。空のときはフィルタなしです。
+
+```python
+REGULAR_TITLE_INCLUDES: tuple[str, ...] = ("警報級の可能性",)  # 初期値は () = 全件
+```
 
 動作は次のとおりです。
 
@@ -57,6 +64,10 @@ caffeinate -i python -m logger
   **再起動しても続きから保存**されます
 - フィード取得は `If-Modified-Since` / `ETag` による条件付き GET(更新が無ければ 304)
 - 電文本体のダウンロードは並列度 2、1件ごとに 0.2 秒待ち。気象庁のサーバーに負荷をかけません
+
+随時フィードの新着が **30分以上途切れる**と、ログに WARNING を出します
+(`NO_NEW_ENTRY_WARN_SEC`)。気象庁側が静かなだけのこともありますが、取得が
+止まっていることに気づくための目安です。
 
 長期フィードは7日分(約 7,500 件)を含むため、穴埋めで遡る上限を
 `BACKFILL_MAX_AGE_HOURS`(初期値 24時間)で制限しています。これより長く停止していた分を
@@ -108,9 +119,12 @@ jev-stormboard/
 ## 保存状況と容量の確認
 
 ```bash
-python -m logger.stats   # 件数、種類別の件数、日別の容量、最終取得時刻
+python -m logger.stats   # 件数、種類別の件数、日別の容量、最終の新着からの経過時間
 du -sh data/             # 実際のディスク使用量
 ```
+
+`stats` の「最終の新着からの経過時間」で、取得が続いているかを確認できます。
+随時(extra)が 30分以上途切れていると、その旨が表示されます。
 
 `data/` は数千ファイルになるため、`ls` や grep で中を探さず、
 `index.jsonl` と `stats` で確認してください。
@@ -122,7 +136,7 @@ du -sh data/             # 実際のディスク使用量
 TITLE_EXCLUDES: tuple[str, ...] = ("大雨危険度通知",)
 ```
 
-定時フィードのフィルタ条件も同じファイルの `REGULAR_TITLE_INCLUDES` で変更できます。
+定時フィードを種類で絞る `REGULAR_TITLE_INCLUDES` も同じファイルにあります(初期値は空 = 全件)。
 
 ## 停止と再起動
 
