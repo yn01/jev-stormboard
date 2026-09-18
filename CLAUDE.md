@@ -29,6 +29,8 @@
 - 実際の防災判断に使うものではなくデモである。画面と README にもその旨を明記する。
 
 ## よく使うコマンド
+依存は `.venv` に入れてある。先に `source .venv/bin/activate` すること。
+
 ```bash
 caffeinate -i python -m logger    # 起動(スリープ防止)
 python -m logger.stats            # 保存状況の確認
