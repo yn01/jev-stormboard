@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from . import config
@@ -30,6 +30,20 @@ def load_records(index_path: Path) -> list[dict]:
     return records
 
 
+def elapsed(since: datetime) -> str:
+    """いまからの経過時間を「1時間23分」の形にする。"""
+    seconds = int((datetime.now(timezone.utc) - since).total_seconds())
+    if seconds < 0:
+        seconds = 0
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}時間{minutes}分"
+    if minutes:
+        return f"{minutes}分{secs}秒"
+    return f"{secs}秒"
+
+
 def human(size: int) -> str:
     value = float(size)
     for unit in ("B", "KB", "MB", "GB"):
@@ -46,6 +60,7 @@ def summarize(records: list[dict]) -> dict:
     by_day_bytes: defaultdict[str, int] = defaultdict(int)
     total_bytes = 0
     latest: str | None = None
+    latest_by_feed: dict[str, str] = {}
 
     for record in records:
         by_title[record.get("title", "(不明)")] += 1
@@ -64,8 +79,12 @@ def summarize(records: list[dict]) -> dict:
         by_day_bytes[day] += size
 
         fetched = record.get("fetched_at")
-        if fetched and (latest is None or fetched > latest):
-            latest = fetched
+        if fetched:
+            if latest is None or fetched > latest:
+                latest = fetched
+            feed = record.get("feed", "(不明)")
+            if feed not in latest_by_feed or fetched > latest_by_feed[feed]:
+                latest_by_feed[feed] = fetched
 
     return {
         "total": len(records),
@@ -75,6 +94,7 @@ def summarize(records: list[dict]) -> dict:
         "by_day_count": by_day_count,
         "by_day_bytes": by_day_bytes,
         "latest": latest,
+        "latest_by_feed": latest_by_feed,
     }
 
 
@@ -85,13 +105,32 @@ def render(summary: dict) -> str:
 
     latest = summary["latest"]
     if latest:
-        local = datetime.fromisoformat(latest).astimezone(JST)
-        lines.append(f"最終取得: {local.strftime('%Y-%m-%d %H:%M:%S')} JST")
+        at = datetime.fromisoformat(latest)
+        lines.append(
+            f"最終取得: {at.astimezone(JST).strftime('%Y-%m-%d %H:%M:%S')} JST"
+            f" ({elapsed(at)}前)"
+        )
     else:
         lines.append("最終取得: なし")
 
     feeds = ", ".join(f"{k}={v}" for k, v in sorted(summary["by_feed"].items()))
     lines.append(f"フィード別: {feeds or 'なし'}")
+
+    lines.append("")
+    lines.append("最終の新着からの経過時間:")
+    if not summary["latest_by_feed"]:
+        lines.append("  (なし)")
+    for feed, fetched in sorted(summary["latest_by_feed"].items()):
+        at = datetime.fromisoformat(fetched)
+        mark = ""
+        if feed == "extra" and (
+            datetime.now(timezone.utc) - at
+        ).total_seconds() >= config.NO_NEW_ENTRY_WARN_SEC:
+            mark = "  ← 新着が途切れています"
+        lines.append(
+            f"  {feed:8s} {elapsed(at):>10s}前"
+            f"  ({at.astimezone(JST).strftime('%m-%d %H:%M:%S')} JST){mark}"
+        )
 
     lines.append("")
     lines.append("種類(title)別の件数:")
