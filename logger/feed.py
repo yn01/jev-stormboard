@@ -93,11 +93,12 @@ def should_save(entry: Entry) -> bool:
     """保存対象かどうかを判定する。
 
     - 随時(extra): 全エントリが対象
-    - 定時(regular): title に REGULAR_TITLE_INCLUDES のいずれかを含むものだけ
+    - 定時(regular): REGULAR_TITLE_INCLUDES が空なら全件。空でなければ、
+      title にそのいずれかを含むものだけ
     - どちらも TITLE_EXCLUDES に当たるものは除外する
     """
     if any(word in entry.title for word in config.TITLE_EXCLUDES):
         return False
-    if entry.feed == "regular":
+    if entry.feed == "regular" and config.REGULAR_TITLE_INCLUDES:
         return any(word in entry.title for word in config.REGULAR_TITLE_INCLUDES)
     return True
