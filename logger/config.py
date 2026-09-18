@@ -44,6 +44,11 @@ TITLE_EXCLUDES: tuple[str, ...] = ()
 POLL_INTERVAL_SEC = 60  # 高頻度フィードのポーリング間隔。短くしないこと
 BACKFILL_INTERVAL_SEC = 60 * 60  # 長期フィードによる穴埋めの間隔(起動時にも実行)
 
+# 穴埋めで遡る上限(時間)。長期フィードは 7 日分(約 7,500 件)を含むため、
+# 初回起動でその全件を取りに行かないよう上限を設ける。これより長く停止して
+# いた場合は、必要に応じてこの値を一時的に大きくする。
+BACKFILL_MAX_AGE_HOURS = 24
+
 HTTP_TIMEOUT_SEC = 30.0
 USER_AGENT = "jev-stormboard-logger/0.1 (personal demo; +https://github.com/yn01/jev-stormboard)"
 

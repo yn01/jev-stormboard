@@ -14,6 +14,7 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 
 import httpx
@@ -90,6 +91,16 @@ def fetch_documents(entries: list[Entry], fetcher: Fetcher, store: Store) -> int
     return saved
 
 
+def within_backfill_window(entry: Entry) -> bool:
+    """穴埋めで遡る上限より新しいかどうか。"""
+    limit = datetime.now(timezone.utc) - timedelta(hours=config.BACKFILL_MAX_AGE_HOURS)
+    try:
+        return entry.updated_dt >= limit
+    except ValueError:
+        # updated が読めない電文は、取りこぼさないよう対象に含める
+        return True
+
+
 def poll_feed(feed: config.Feed, fetcher: Fetcher, store: Store) -> None:
     """フィードを 1 つ取得し、保存対象の電文を保存する。"""
     try:
@@ -108,6 +119,9 @@ def poll_feed(feed: config.Feed, fetcher: Fetcher, store: Store) -> None:
         return
 
     targets = [e for e in entries if should_save(e)]
+    if feed.kind == "long":
+        # 長期フィードは 7 日分を含む。遡る上限より古いものは取りに行かない
+        targets = [e for e in targets if within_backfill_window(e)]
     saved = fetch_documents(targets, fetcher, store)
     if saved:
         log.info(
