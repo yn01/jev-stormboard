@@ -1,0 +1,32 @@
+# 保存した電文とログ(ディレクトリだけ .gitkeep で残す)
+/data/**
+/logs/**
+!/data/
+!/data/raw/
+!/data/replay/
+!/logs/
+!/data/**/.gitkeep
+!/logs/**/.gitkeep
+
+# 秘密情報
+.claude/settings.local.json
+.env
+.env.*
+*.key
+*.pem
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# macOS / エディタ
+.DS_Store
+.idea/
+.vscode/
