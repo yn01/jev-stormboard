@@ -79,7 +79,7 @@ class Store:
             "author": entry.author,
             "feed": entry.feed,
             "url": entry.url,
-            "path": str(path.relative_to(config.PATHS.root)),
+            "path": self._relative(path),
             "bytes": len(body),
             "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
@@ -89,6 +89,19 @@ class Store:
         self._append_index(record)
         self._seen.add(entry.id)
         return record
+
+    def _relative(self, path: Path) -> str:
+        """索引には、プロジェクトルートからの相対パスを書く。
+
+        ルートの外に保存先を置いた場合(テストなど)は、raw_dir の親からの
+        相対パスにする。
+        """
+        for base in (config.PATHS.root, self.raw_dir.parent):
+            try:
+                return str(path.relative_to(base))
+            except ValueError:
+                continue
+        return str(path)
 
     @staticmethod
     def _write_atomic(path: Path, data: bytes) -> None:

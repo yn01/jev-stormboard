@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" lang="ja">
+  <title>高頻度（定時）</title>
+  <subtitle>JMAXML publishing feed</subtitle>
+  <updated>2026-09-19T03:11:24+09:00</updated>
+  <id>https://www.data.jma.go.jp/developer/xml/feed/regular.xml#short_1789755084</id>
+  <link rel="related" href="https://www.jma.go.jp/"/>
+  <link rel="self" href="https://www.data.jma.go.jp/developer/xml/feed/regular.xml"/>
+  <link rel="hub" href="http://alert-hub.appspot.com/"/>
+  <rights type="html"><![CDATA[
+<a href="https://www.jma.go.jp/jma/kishou/info/coment.html">利用規約</a>,
+<a href="https://www.jma.go.jp/jma/en/copyright.html">Terms of Use</a>
+]]></rights>
+    <entry>
+    <title>警報級の可能性（明日まで）</title>
+    <id>https://www.data.jma.go.jp/developer/xml/data/20260918122133_0_VPFD60_450000.xml</id>
+    <updated>2026-09-18T12:21:33Z</updated>
+    <author>
+      <name>宮崎地方気象台</name>
+    </author>
+    <link type="application/xml" href="https://www.data.jma.go.jp/developer/xml/data/20260918122133_0_VPFD60_450000.xml"/>
+    <content type="text">【宮崎県警報級の可能性（明日まで）】</content>
+  </entry>
+  <entry>
+    <title>警報級の可能性（明日まで）</title>
+    <id>https://www.data.jma.go.jp/developer/xml/data/20260918113147_0_VPFD60_160000.xml</id>
+    <updated>2026-09-18T11:31:46Z</updated>
+    <author>
+      <name>富山地方気象台</name>
+    </author>
+    <link type="application/xml" href="https://www.data.jma.go.jp/developer/xml/data/20260918113147_0_VPFD60_160000.xml"/>
+    <content type="text">【富山県警報級の可能性（明日まで）】</content>
+  </entry>
+  <entry>
+    <title>気象警報・注意報（Ｒ０６）（集約通報）</title>
+    <id>https://www.data.jma.go.jp/developer/xml/data/20260918181059_0_VPWS50_010000.xml</id>
+    <updated>2026-09-18T18:10:57Z</updated>
+    <author>
+      <name>気象庁</name>
+    </author>
+    <link type="application/xml" href="https://www.data.jma.go.jp/developer/xml/data/20260918181059_0_VPWS50_010000.xml"/>
+    <content type="text">【警戒・注意事項集約定時通報】</content>
+  </entry>
+  <entry>
+    <title>気象警報・注意報（Ｒ０６）（集約通報）</title>
+    <id>https://www.data.jma.go.jp/developer/xml/data/20260918180116_0_VPWS50_010000.xml</id>
+    <updated>2026-09-18T18:01:14Z</updated>
+    <author>
+      <name>気象庁</name>
+    </author>
+    <link type="application/xml" href="https://www.data.jma.go.jp/developer/xml/data/20260918180116_0_VPWS50_010000.xml"/>
+    <content type="text">【警戒・注意事項集約定時通報】</content>
+  </entry>
+  <entry>
+    <title>気象警報・注意報（Ｒ０６）（集約通報）</title>
+    <id>https://www.data.jma.go.jp/developer/xml/data/20260918175054_0_VPWS50_010000.xml</id>
+    <updated>2026-09-18T17:50:51Z</updated>
+    <author>
+      <name>気象庁</name>
+    </author>
+    <link type="application/xml" href="https://www.data.jma.go.jp/developer/xml/data/20260918175054_0_VPWS50_010000.xml"/>
+    <content type="text">【警戒・注意事項集約定時通報】</content>
+  </entry>
+</feed>
