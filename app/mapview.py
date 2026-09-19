@@ -303,55 +303,61 @@ MAP_STYLE = """
 .jev-map .home{fill:#38bdf8;stroke:#0b1220;stroke-width:1.2;}
 .jev-map .home-pulse{fill:#38bdf8;opacity:.55;animation:jevpulse 2.2s ease-out infinite;}
 @keyframes jevpulse{0%{r:4;opacity:.55}70%{r:16;opacity:0}100%{r:16;opacity:0}}
-.jev-legend{display:flex;align-items:center;gap:22px;margin:10px 0 4px;font-size:.72rem;
-  color:#94a3b8;flex-wrap:wrap;}
-.jev-legend .axis{display:flex;align-items:center;gap:8px;}
+.jev-legend{margin-top:12px;padding-top:10px;border-top:1px solid #1e293b;
+  font-size:.72rem;color:#94a3b8;}
+.jev-legend .ttl{color:#64748b;font-size:.68rem;letter-spacing:.06em;margin-bottom:6px;}
+.jev-legend .axis{margin-bottom:8px;}
+.jev-legend .head{display:flex;align-items:baseline;gap:6px;}
 .jev-legend .cap{color:#64748b;}
-.jev-legend .bar{width:130px;height:9px;border-radius:5px;
+.jev-legend .row{display:flex;align-items:center;gap:8px;margin-top:2px;}
+.jev-legend .bar{width:92px;height:9px;border-radius:5px;
   background:linear-gradient(90deg,#1e293b,#1e40af,#4338ca,#7c3aed,#d946ef);}
-.jev-legend .dots{display:inline-flex;align-items:center;}
 .jev-legend .ends{color:#64748b;white-space:nowrap;}
-.jev-note{font-size:.72rem;color:#94a3b8;margin:0 0 12px;}
-.jev-note b{color:#f0abfc;}
+.jev-legend .note{color:#94a3b8;line-height:1.5;margin-top:8px;}
+.jev-legend .note b{color:#f0abfc;}
 .jev-map .sev{pointer-events:none;transition:r .8s ease,fill .8s ease,stroke .8s ease;}
 </style>
 """
 
 
 def legend_html() -> str:
-    """凡例。2つの軸が別のものだと分かるように、並べて出す。
+    """凡例。2つの軸が別のものだと分かるように、縦に積んで出す。
 
     - 面の色 = Jev が判定した「自分にとっての関連度」
     - 円の大きさ = 電文が示す「事象の深刻さ」
+
+    地図の枠の下ではなく、地図の横にある都県の一覧の下に置く。
+    一覧には色のバーと円が並んでいるので、そのすぐ下にあると対応が取りやすい。
     """
     return (
         '<div class="jev-legend">'
+        '<div class="ttl">この地図の見方</div>'
         # 面の色 = 関連度
-        '<span class="axis">'
-        '<b style="color:#c4b5fd;">面の色</b>'
-        '<span class="cap">あなたにとっての関連度</span>'
-        '<span class="bar"></span>'
-        '<span class="ends">低 → 高</span>'
-        "</span>"
-        # 円 = 深刻さ
-        '<span class="axis">'
-        f'<b style="color:{SEVERITY_FILL};">円の大きさ</b>'
-        '<span class="cap">事象の深刻さ（警報の強さ）</span>'
-        '<span class="dots">'
-        f'<svg viewBox="0 0 92 26" width="92" height="26">'
-        f'<circle cx="10" cy="13" r="4" fill="{SEVERITY_FILL}" fill-opacity=".3" '
-        f'stroke="{SEVERITY_FILL}" stroke-width="1.2"/>'
-        f'<circle cx="34" cy="13" r="7" fill="{SEVERITY_FILL}" fill-opacity=".3" '
-        f'stroke="{SEVERITY_FILL}" stroke-width="1.2"/>'
-        f'<circle cx="64" cy="13" r="11" fill="{SEVERITY_HOT}" fill-opacity=".3" '
-        f'stroke="{SEVERITY_HOT}" stroke-width="1.2"/>'
-        "</svg></span>"
-        '<span class="ends">弱 → 強</span>'
-        "</span>"
+        '<div class="axis">'
+        '<div class="head"><b style="color:#c4b5fd;">面の色</b>'
+        '<span class="cap">あなたにとっての関連度</span></div>'
+        '<div class="row"><span class="bar"></span>'
+        '<span class="ends">低 → 高</span></div>'
         "</div>"
-        '<div class="jev-note">'
-        "色の濃さは<b>警報の強さではありません</b>。"
+        # 円 = 深刻さ
+        '<div class="axis">'
+        f'<div class="head"><b style="color:{SEVERITY_FILL};">円の大きさ</b>'
+        '<span class="cap">事象の深刻さ</span></div>'
+        '<div class="row">'
+        f'<svg viewBox="0 0 88 26" width="88" height="26">'
+        f'<circle cx="10" cy="13" r="4" fill="{SEVERITY_FILL}" fill-opacity=".22" '
+        f'stroke="{SEVERITY_FILL}" stroke-width="1.4"/>'
+        f'<circle cx="33" cy="13" r="7" fill="{SEVERITY_FILL}" fill-opacity=".22" '
+        f'stroke="{SEVERITY_FILL}" stroke-width="1.4"/>'
+        f'<circle cx="62" cy="13" r="11" fill="{SEVERITY_HOT}" fill-opacity=".22" '
+        f'stroke="{SEVERITY_HOT}" stroke-width="1.4"/>'
+        "</svg>"
+        '<span class="ends">弱 → 強</span></div>'
+        "</div>"
+        '<div class="note">'
+        "面の色は<b>警報の強さではありません</b>。"
         "色が濃く、円も大きい地域が「自分にとって重大」です。"
+        "</div>"
         "</div>"
     )
 

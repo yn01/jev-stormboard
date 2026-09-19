@@ -581,8 +581,7 @@ def render_map(thresholds: dict, profile: dict) -> None:
 
     left, right = st.columns([2.4, 1])
     with left:
-        st.markdown(MAP_STYLE + build_svg(map_data, profile) + legend_html(),
-                    unsafe_allow_html=True)
+        st.markdown(MAP_STYLE + build_svg(map_data, profile), unsafe_allow_html=True)
     with right:
         stats = kanto_prefectures(map_data)
         rows = [
@@ -635,6 +634,9 @@ def render_map(thresholds: dict, profile: dict) -> None:
                 f"{tops[0].name}が最も高いのは、"
                 f"「{tops[0].top_title[:26]}」の判定によるものです。</div>"
             )
+        # 凡例は一覧の下に置く。一覧には色のバーと円が並んでいるので、
+        # そのすぐ下にあると色と大きさの意味を突き合わせやすい
+        rows.append(legend_html())
         st.markdown("".join(rows), unsafe_allow_html=True)
 
     st.caption(map_caption(map_data))
