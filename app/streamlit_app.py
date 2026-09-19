@@ -31,12 +31,22 @@ STREAM_LIMIT = 60  # 「流れる電文」に出す行数
 
 # Choice action の値ごとの色。深刻なほど赤に寄せる
 ACTION_COLORS = {
-    "通常どおり": "#6b7280",
-    "予定変更を検討": "#0369a1",
-    "今日中に備える": "#b45309",
-    "外出を控える": "#c2410c",
-    "早めの避難を検討": "#b91c1c",
+    "通常どおり": "#15803d",
+    "予定変更を検討": "#a16207",
+    "今日中に備える": "#c2410c",
+    "外出を控える": "#dc2626",
+    "早めの避難を検討": "#991b1b",
 }
+
+# 結論バナーの背景。行動が重くなるほど赤に寄せる
+ACTION_BANNER = {
+    "通常どおり": ("#dcfce7", "#15803d", "#166534"),
+    "予定変更を検討": ("#fef9c3", "#ca8a04", "#854d0e"),
+    "今日中に備える": ("#ffedd5", "#ea580c", "#9a3412"),
+    "外出を控える": ("#fee2e2", "#dc2626", "#991b1b"),
+    "早めの避難を検討": ("#7f1d1d", "#450a0a", "#ffffff"),
+}
+BANNER_NONE = ("#f3f4f6", "#d1d5db", "#6b7280")
 
 st.set_page_config(page_title="jev-stormboard", page_icon="🌀", layout="wide")
 
@@ -265,11 +275,159 @@ def render_header(profile: dict) -> None:
         "</div>",
         unsafe_allow_html=True,
     )
+    where = f"{profile.get('pref', '')}{profile.get('city', '')}" or "地域未設定"
+    source = profile.get("_source", "profile.yaml")
     st.markdown(
         f"### 🌀 jev-stormboard　"
         f'<span style="font-size:1rem;color:#6b7280;">'
-        f"{profile.get('name','')}（{profile.get('pref','')}{profile.get('city','')}）向けの判定"
-        f"</span>",
+        f"{profile.get('name', '')}（{where}）向けの判定"
+        f"</span>　"
+        f'<span style="font-size:0.75rem;color:#9ca3af;">読み込み元: {source}</span>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_mode_bar() -> None:
+    """モードの常時表示と操作ボタン。結論バナーのすぐ上に置く。
+
+    本番中にライブかリプレイかを迷わないよう、本文の上部にも出す。
+    """
+    engine = get_engine()
+    status = engine.status
+
+    left, right = st.columns([3, 2])
+
+    with left:
+        if status.mode == "replay":
+            state = "一時停止中" if status.paused else f"{status.replay_speed}倍速で再生中"
+            progress = (
+                f"　{status.replay_done:,}/{status.replay_total:,}件"
+                if status.replay_total
+                else ""
+            )
+            st.markdown(
+                '<div style="display:flex;align-items:center;gap:10px;padding:6px 12px;'
+                'background:#ede9fe;border:1px solid #7c3aed;border-radius:20px;'
+                'display:inline-flex;">'
+                '<span style="width:10px;height:10px;border-radius:50%;background:#7c3aed;'
+                'display:inline-block;"></span>'
+                '<span style="font-weight:700;color:#5b21b6;">リプレイ</span>'
+                f'<span style="color:#5b21b6;font-size:0.85rem;">'
+                f"{status.replay_day}　{state}{progress}</span>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            since = status.seconds_since_last_judge()
+            if since is None:
+                elapsed = "まだ判定していません"
+            elif since < 60:
+                elapsed = f"最終判定 {since:.0f}秒前"
+            else:
+                elapsed = f"最終判定 {since / 60:.0f}分前"
+            st.markdown(
+                "<style>@keyframes blink{0%,100%{opacity:1}50%{opacity:0.25}}</style>"
+                '<div style="display:inline-flex;align-items:center;gap:10px;padding:6px 12px;'
+                'background:#dcfce7;border:1px solid #16a34a;border-radius:20px;">'
+                '<span style="width:10px;height:10px;border-radius:50%;background:#16a34a;'
+                'display:inline-block;animation:blink 1.4s infinite;"></span>'
+                '<span style="font-weight:700;color:#15803d;">ライブ</span>'
+                f'<span style="color:#15803d;font-size:0.85rem;">{elapsed}</span>'
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+    with right:
+        if status.mode == "replay":
+            cols = st.columns(3)
+            if status.paused:
+                if cols[0].button("▶ 再生", use_container_width=True):
+                    engine.resume()
+                    st.rerun()
+            else:
+                if cols[0].button("⏸ 一時停止", use_container_width=True):
+                    engine.pause()
+                    st.rerun()
+            if cols[1].button("⏮ 最初から", use_container_width=True):
+                engine.restart()
+                st.rerun()
+            if cols[2].button("↻ 更新", use_container_width=True):
+                st.rerun()
+        else:
+            if st.button("↻ いますぐ確認", use_container_width=True):
+                engine.refresh_now()
+                st.rerun()
+
+
+def _supplement(judged: JudgedMessage, key: str) -> str:
+    """補足指標1つぶんの小さなカード。"""
+    answer = judged.answer(key) if judged else None
+    if answer is None:
+        return (
+            '<div style="flex:1;padding:8px 12px;background:#f9fafb;border-radius:6px;">'
+            '<div style="font-size:0.75rem;color:#6b7280;">--</div>'
+            '<div style="font-size:1.1rem;color:#9ca3af;">--</div></div>'
+        )
+
+    ratio = answer.scale_ratio()
+    if answer.kind == "score":
+        shown = f"{float(answer.value):.2f} / {answer.scale_max}"
+    else:
+        shown = f"{float(answer.value):.2f}"
+    color = "#dc2626" if ratio >= 0.7 else ("#2563eb" if ratio >= 0.4 else "#6b7280")
+    return (
+        '<div style="flex:1;padding:8px 12px;background:#f9fafb;border-radius:6px;">'
+        f'<div style="font-size:0.75rem;color:#6b7280;">{answer.label}</div>'
+        f'<div style="font-size:1.25rem;font-weight:600;color:{color};'
+        f'font-variant-numeric:tabular-nums;">{shown}</div>'
+        f'<div style="margin-top:4px;">{bar(ratio, color)}</div>'
+        "</div>"
+    )
+
+
+@st.fragment(run_every="2s")
+def render_conclusion(thresholds: dict) -> None:
+    """第1層: いま取るべき行動を1つだけ、大きく出す。
+
+    画面を開いた瞬間に結論が分かるようにするための、この画面の主役。
+    """
+    engine = get_engine()
+    judged_all = engine.store.all(thresholds["question_count"])
+    relevant = [j for j in judged_all if j.relevance >= thresholds["relevance"]]
+    top = relevant[0] if relevant else None
+
+    if top is None:
+        background, border, text = BANNER_NONE
+        headline = "関係する情報はまだありません"
+        sub = (
+            f"「この地域に関係する」が {thresholds['relevance']:.2f} 以上の電文が"
+            "まだ判定されていません。"
+        )
+    else:
+        background, border, text = ACTION_BANNER.get(top.action, BANNER_NONE)
+        headline = top.action or "判定中"
+        sub = (
+            f"{top.title or top.kind}　|　{top.author}　|　"
+            f"{jst_time(top.updated, '%m月%d日 %H:%M')} JST"
+        )
+
+    st.markdown(
+        f'<div style="background:{background};border:2px solid {border};'
+        f'border-radius:10px;padding:22px 26px;margin:6px 0 10px;">'
+        f'<div style="font-size:0.8rem;color:{text};opacity:0.8;letter-spacing:0.08em;">'
+        f"いま取るべき行動</div>"
+        f'<div style="font-size:3rem;font-weight:700;line-height:1.2;color:{text};">'
+        f"{headline}</div>"
+        f'<div style="font-size:0.85rem;color:{text};opacity:0.85;margin-top:8px;">'
+        f"{sub}</div>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # 第2層: 補足指標を3つだけ
+    parts = "".join(_supplement(top, key) for key in ("imminent", "severity", "impact"))
+    st.markdown(
+        f'<div style="display:flex;gap:10px;margin-bottom:6px;">{parts}</div>',
         unsafe_allow_html=True,
     )
 
@@ -310,10 +468,11 @@ def render_metrics(profile: dict) -> None:
         st.error(f"エラー: {s.error}")
 
     state = "稼働中" if s.running else "停止"
-    extra = ""
-    if s.mode == "replay" and s.replay_total:
-        extra = f"　{s.replay_done}/{s.replay_total}件"
-    st.caption(f"{state}｜{s.message}{extra}")
+    source = s.profile_source or "profile.yaml"
+    st.caption(
+        f"{state}｜{s.message}　|　プロファイル: `{source}`"
+        f"（{s.profile_name}・指紋 `{s.profile_fingerprint}`）"
+    )
 
 
 def render_profile_notice(profile: dict, engine: Engine) -> None:
@@ -441,13 +600,37 @@ def render_stream(thresholds: dict) -> None:
 def main() -> None:
     profile = get_profile()
     thresholds = render_sidebar()
+    engine = get_engine()
 
+    # リプレイ中は背景の色味を変えて、ライブと見間違えないようにする
+    if engine.status.mode == "replay":
+        st.markdown(
+            "<style>"
+            '[data-testid="stAppViewContainer"]{background:'
+            "linear-gradient(#faf5ff,#ffffff 160px);}"
+            '[data-testid="stAppViewContainer"]::before{content:"";position:fixed;'
+            "top:0;left:0;right:0;height:5px;background:#7c3aed;z-index:999;}"
+            '[data-testid="stAppViewContainer"]::after{content:"";position:fixed;'
+            "bottom:0;left:0;right:0;height:5px;background:#7c3aed;z-index:999;}"
+            "</style>",
+            unsafe_allow_html=True,
+        )
+
+    # 第1層: 注意書き → モード → 結論
     render_header(profile)
-    render_metrics(profile)
+    render_mode_bar()
+    render_conclusion(thresholds)
+
     st.divider()
     render_featured(thresholds)
     st.divider()
     render_stream(thresholds)
+
+    # 第3層: Jev の性能を示す数字。状況ではないので下に置く。
+    # ただしデモの主張として重要なので、初期状態は開いておく。
+    st.divider()
+    with st.expander("Jev の性能（処理件数・レイテンシ・トークン・コスト）", expanded=True):
+        render_metrics(profile)
 
 
 main()
