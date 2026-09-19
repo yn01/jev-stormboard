@@ -25,9 +25,9 @@ from typing import Any
 
 from core.judge import judge, load_api_key, load_profile
 from core.message import IndexRecord, load_index
-from core.questions import QUESTIONS
+from core.questions import DEFAULT_QUESTION_COUNT
 
-from .store import JudgedMessage, JudgedStore
+from .store import JudgedMessage, JudgedStore, profile_fingerprint
 
 log = logging.getLogger("app.engine")
 
@@ -55,7 +55,7 @@ class Metrics:
     total_latency_ms: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
-    question_count: int = field(default_factory=lambda: len(QUESTIONS))
+    question_count: int = DEFAULT_QUESTION_COUNT
 
     @property
     def average_latency_ms(self) -> float:
@@ -82,6 +82,10 @@ class Status:
     replay_done: int = 0
     replay_total: int = 0
     queue_size: int = 0
+    question_count: int = DEFAULT_QUESTION_COUNT
+    profile_name: str = ""
+    profile_fingerprint: str = ""
+    profile_reloaded_at: str = ""
 
     @property
     def rate_limited(self) -> bool:
@@ -116,6 +120,12 @@ class Engine:
         # これより新しいものだけを判定するので、索引全体を際限なく遡らない。
         self._live_cursor: str | None = None
 
+        # 画面から切り替える質問数。変えると未判定扱いになり、その数で判定し直す
+        self._question_count = DEFAULT_QUESTION_COUNT
+
+        # profile.yaml の再読み込み用。ファイルの更新時刻が変わったら読み直す
+        self._profile_mtime: float | None = None
+
     # ------------------------------------------------------------ 起動と停止
 
     def start(self) -> None:
@@ -133,30 +143,49 @@ class Engine:
 
     # ------------------------------------------------------------ モードの切り替え
 
-    def set_mode(self, mode: str, replay_day: str = "", replay_speed: int = 1) -> None:
-        """画面から呼ぶ。モードが変わったら、進行中の再生を打ち切って切り替える。"""
+    def set_mode(
+        self,
+        mode: str,
+        replay_day: str = "",
+        replay_speed: int = 1,
+        question_count: int | None = None,
+    ) -> None:
+        """画面から呼ぶ。指示が変わったら、進行中の再生を打ち切って切り替える。"""
+        count = question_count or self._question_count
         with self._lock:
             changed = (
                 mode != self._mode
                 or replay_day != self._replay_day
                 or replay_speed != self._replay_speed
+                or count != self._question_count
             )
             if not changed:
                 return
+            count_changed = count != self._question_count
             self._mode = mode
             self._replay_day = replay_day
             self._replay_speed = replay_speed
+            self._question_count = count
             self._mode_generation += 1
             self.status.mode = mode
             self.status.replay_day = replay_day
             self.status.replay_speed = replay_speed
+            self.status.question_count = count
             self.status.replay_done = 0
             self.status.replay_total = 0
+            self.metrics.question_count = count
+            if count_changed:
+                # 質問数が変わると結果も変わるので、ライブの位置を戻して判定し直す
+                self._live_cursor = None
         self._wake.set()
 
     def _current_mode(self) -> tuple[str, str, int, int]:
         with self._lock:
             return self._mode, self._replay_day, self._replay_speed, self._mode_generation
+
+    def _count(self) -> int:
+        with self._lock:
+            return self._question_count
 
     # ------------------------------------------------------------ 本体
 
@@ -166,7 +195,7 @@ class Engine:
             from typesafe_sdk import TypeSafeClient
 
             self._client = TypeSafeClient()
-            self._profile = load_profile()
+            self._reload_profile()
         except Exception as exc:  # 起動に失敗しても画面は動かす
             self.status.error = f"初期化に失敗しました: {exc}"
             self.status.running = False
@@ -174,6 +203,9 @@ class Engine:
             return
 
         while not self._stop.is_set():
+            # 書き換えられていれば読み直す(画面の再読み込みで反映されるように)
+            if self._reload_profile():
+                self._live_cursor = None  # 以後は新しいプロファイルで判定する
             mode, day, speed, generation = self._current_mode()
             try:
                 if mode == "replay":
@@ -186,6 +218,33 @@ class Engine:
                 self._sleep(ERROR_WAIT_SEC)
 
         self.status.running = False
+
+    def _reload_profile(self) -> bool:
+        """profile.yaml を読み直す。更新されていれば True。
+
+        画面を再読み込みしたときに、書き換えたプロファイルが反映されるようにする。
+        """
+        from core.judge import PROFILE_PATH
+
+        try:
+            mtime = PROFILE_PATH.stat().st_mtime
+        except OSError:
+            return False
+        if self._profile_mtime is not None and mtime == self._profile_mtime:
+            return False
+        try:
+            profile = load_profile()
+        except Exception as exc:
+            self.status.error = f"profile.yaml を読めません: {exc}"
+            return False
+
+        self._profile = profile
+        self._profile_mtime = mtime
+        self.status.profile_name = str(profile.get("name", ""))
+        self.status.profile_fingerprint = profile_fingerprint(profile)
+        self.status.profile_reloaded_at = datetime.now(JST).strftime("%H:%M:%S")
+        log.info("profile.yaml を読み込みました (%s)", self.status.profile_fingerprint)
+        return True
 
     def _sleep(self, seconds: float) -> None:
         """停止やモード変更で早く抜けられる待ち。"""
@@ -201,13 +260,14 @@ class Engine:
             self._sleep(LIVE_POLL_SEC)
             return
 
+        count = self._count()
         newest = max(r.updated for r in records)
 
         if self._live_cursor is None:
             # 初回だけ、直近のぶんをさかのぼって判定する(画面が空にならないように)。
             # 索引には数千件あるので、起動と同時に全件を投げない。
             pending = sorted(
-                (r for r in records if not self.store.has(r.id)),
+                (r for r in records if not self.store.has(r.id, count)),
                 key=lambda r: r.updated,
             )[-LIVE_INITIAL_BACKLOG:]
         else:
@@ -215,7 +275,7 @@ class Engine:
             # これがないと、未判定の古い電文を毎周期さかのぼって判定してしまう。
             cursor = self._live_cursor
             pending = sorted(
-                (r for r in records if r.updated > cursor and not self.store.has(r.id)),
+                (r for r in records if r.updated > cursor and not self.store.has(r.id, count)),
                 key=lambda r: r.updated,
             )
 
@@ -272,8 +332,12 @@ class Engine:
     # ------------------------------------------------------------ 判定1件
 
     def _judge_one(self, record: IndexRecord) -> None:
-        """1件を判定する。判定済みならキャッシュを使って API を呼ばない。"""
-        if self.store.has(record.id):
+        """1件を判定する。判定済みならキャッシュを使って API を呼ばない。
+
+        同じ電文でも質問数が違えば結果が変わるので、質問数ごとに別扱いにする。
+        """
+        count = self._count()
+        if self.store.has(record.id, count):
             return
         if not record.full_path.exists():
             return
@@ -281,7 +345,9 @@ class Engine:
         from typesafe_sdk import TypeSafeError, TypeSafeRateLimitError
 
         try:
-            judgement = judge(record, self._profile or {}, client=self._client)
+            judgement = judge(
+                record, self._profile or {}, client=self._client, question_count=count
+            )
         except TypeSafeRateLimitError:
             # 処理は止めず、間隔を空けて次の周期で再試行する
             self.status.rate_limited_until = time.monotonic() + RATE_LIMIT_WAIT_SEC
@@ -300,11 +366,11 @@ class Engine:
             log.warning("判定できませんでした %s: %s", record.id, exc)
             return
 
-        judged = JudgedMessage.from_judgement(judgement, record)
+        judged = JudgedMessage.from_judgement(judgement, record, self._profile or {})
         self.store.add(judged)
 
         self.metrics.judged_count += 1
-        self.metrics.total_count = self.store.count()
+        self.metrics.total_count = self.store.count(count)
         self.metrics.last_latency_ms = judged.latency_ms
         self.metrics.total_latency_ms += judged.latency_ms
         self.metrics.input_tokens += judged.input_tokens or 0
