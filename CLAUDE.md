@@ -20,7 +20,8 @@
 | `logger/` | ロガー本体。`python -m logger` で起動 |
 | `core/` | 判定コア。`python -m core.judge --latest` |
 | `profile.yaml` | 判定対象の人物プロファイル(1件) |
-| `app/` | Streamlit アプリ(次段階。いまは空) |
+| `app/` | 画面。`streamlit run app/streamlit_app.py` |
+| `data/judged/` | 判定結果 judgements.jsonl。コミットしない |
 | `data/raw/` | 保存した電文 `YYYY-MM-DD/<name>.xml.gz`。コミットしない |
 | `data/replay/` | リプレイ用の加工済みデータ。コミットしない |
 | `data/index.jsonl` | 索引(1電文1行)。コミットしない |
@@ -29,7 +30,8 @@
 
 ## 守るルール
 - `data/raw/` はロガーだけが書き込む。**後から加工も削除もしない**。
-  加工したデータは `data/replay/` に置く。
+  加工したデータは `data/replay/` に置く。画面は `data/raw` と `index.jsonl` を
+  読み取るだけで、書き込むのは `data/judged/` のみ。
 - `data/` 配下を大量に読み込んだり検索したりしない(数千ファイルになる)。
   中身の確認には `data/index.jsonl` と `python -m logger.stats` を使う。
 - **稼働中のロガーを勝手に止めたり再起動したりしない。** 必要な場合は確認する。
@@ -41,7 +43,8 @@
 依存は `.venv` に入れてある。先に `source .venv/bin/activate` すること。
 
 ```bash
-caffeinate -i python -m logger    # 起動(スリープ防止)
+caffeinate -i python -m logger        # ロガー起動(スリープ防止)
+streamlit run app/streamlit_app.py    # 画面(ロガーとは別プロセス)
 python -m logger.stats            # 保存状況の確認
 python -m pytest                  # テスト
 du -sh data/                      # 容量確認
