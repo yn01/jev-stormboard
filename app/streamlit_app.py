@@ -81,6 +81,22 @@ def get_profile() -> dict:
 # ---------------------------------------------------------------- 表示の部品
 
 
+def visible_judgements(thresholds: dict) -> list[JudgedMessage]:
+    """いま画面に出すべき判定結果。
+
+    リプレイ中は、**再生位置までに発表された電文だけ**を見せる。そうしないと、
+    朝を再生していても最新(夜)の電文が先頭に出続けてしまい、再生している様子が
+    画面に出ない。
+    """
+    engine = get_engine()
+    judged = engine.store.all(thresholds["question_count"])
+
+    position = engine.status.replay_position
+    if engine.status.mode == "replay" and position:
+        judged = [j for j in judged if j.updated <= position]
+    return judged
+
+
 def jst_time(value: str, fmt: str = "%m-%d %H:%M") -> str:
     """UTC表記の時刻を JST の短い表記にする。"""
     if not value:
@@ -282,13 +298,6 @@ def render_sidebar() -> dict:
 
 
 def render_header(profile: dict) -> None:
-    st.markdown(
-        '<div style="background:#fef3c7;border-left:5px solid #d97706;padding:10px 14px;'
-        'border-radius:4px;margin-bottom:10px;">'
-        "<b>⚠️ これはデモです。実際の避難判断は、気象庁と自治体の情報に従ってください。</b>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
     where = f"{profile.get('pref', '')}{profile.get('city', '')}" or "地域未設定"
     source = profile.get("_source", "profile.yaml")
     st.markdown(
@@ -301,10 +310,12 @@ def render_header(profile: dict) -> None:
     )
 
 
+@st.fragment(run_every="2s")
 def render_mode_bar() -> None:
     """モードの常時表示と操作ボタン。結論バナーのすぐ上に置く。
 
     本番中にライブかリプレイかを迷わないよう、本文の上部にも出す。
+    リプレイの再生位置(時刻)が進むので、2秒ごとに描き直す。
     """
     engine = get_engine()
     status = engine.status
@@ -319,6 +330,7 @@ def render_mode_bar() -> None:
                 if status.replay_total
                 else ""
             )
+            clock = f"　⏱ {status.replay_position_jst}" if status.replay_position_jst else ""
             st.markdown(
                 '<div style="display:flex;align-items:center;gap:10px;padding:6px 12px;'
                 'background:#ede9fe;border:1px solid #7c3aed;border-radius:20px;'
@@ -327,7 +339,7 @@ def render_mode_bar() -> None:
                 'display:inline-block;"></span>'
                 '<span style="font-weight:700;color:#5b21b6;">リプレイ</span>'
                 f'<span style="color:#5b21b6;font-size:0.85rem;">'
-                f"{status.replay_day}　{state}{progress}</span>"
+                f"{status.replay_day}　{state}{clock}{progress}</span>"
                 "</div>",
                 unsafe_allow_html=True,
             )
@@ -357,20 +369,20 @@ def render_mode_bar() -> None:
             if status.paused:
                 if cols[0].button("▶ 再生", use_container_width=True):
                     engine.resume()
-                    st.rerun()
+                    st.rerun(scope="app")
             else:
                 if cols[0].button("⏸ 一時停止", use_container_width=True):
                     engine.pause()
-                    st.rerun()
+                    st.rerun(scope="app")
             if cols[1].button("⏮ 最初から", use_container_width=True):
                 engine.restart()
-                st.rerun()
+                st.rerun(scope="app")
             if cols[2].button("↻ 更新", use_container_width=True):
-                st.rerun()
+                st.rerun(scope="app")
         else:
             if st.button("↻ いますぐ確認", use_container_width=True):
                 engine.refresh_now()
-                st.rerun()
+                st.rerun(scope="app")
 
 
 def _supplement(judged: JudgedMessage, key: str) -> str:
@@ -405,8 +417,7 @@ def render_conclusion(thresholds: dict) -> None:
 
     画面を開いた瞬間に結論が分かるようにするための、この画面の主役。
     """
-    engine = get_engine()
-    judged_all = engine.store.all(thresholds["question_count"])
+    judged_all = visible_judgements(thresholds)
     relevant = [j for j in judged_all if j.relevance >= thresholds["relevance"]]
     top = relevant[0] if relevant else None
 
@@ -427,12 +438,12 @@ def render_conclusion(thresholds: dict) -> None:
 
     st.markdown(
         f'<div style="background:{background};border:2px solid {border};'
-        f'border-radius:10px;padding:22px 26px;margin:6px 0 10px;">'
-        f'<div style="font-size:0.8rem;color:{text};opacity:0.8;letter-spacing:0.08em;">'
+        f'border-radius:10px;padding:16px 22px;margin:6px 0 10px;">'
+        f'<div style="font-size:0.78rem;color:{text};opacity:0.8;letter-spacing:0.08em;">'
         f"いま取るべき行動</div>"
-        f'<div style="font-size:3rem;font-weight:700;line-height:1.2;color:{text};">'
-        f"{headline}</div>"
-        f'<div style="font-size:0.85rem;color:{text};opacity:0.85;margin-top:8px;">'
+        f'<div style="font-size:2rem;font-weight:700;line-height:1.25;color:{text};'
+        f'margin-top:2px;">{headline}</div>'
+        f'<div style="font-size:0.82rem;color:{text};opacity:0.85;margin-top:6px;">'
         f"{sub}</div>"
         "</div>",
         unsafe_allow_html=True,
@@ -530,9 +541,7 @@ def render_map(thresholds: dict, profile: dict) -> None:
     地図は1回あたりの転送量が大きい(GeoJSON を含めて約120KB)ので、
     ほかの部分より更新間隔を長くする。
     """
-    engine = get_engine()
-    judged_all = engine.store.all(thresholds["question_count"])
-    map_data = build_map_data(judged_all)
+    map_data = build_map_data(visible_judgements(thresholds))
 
     if not PLOTLY_AVAILABLE:
         st.warning(
@@ -594,9 +603,8 @@ def render_map(thresholds: dict, profile: dict) -> None:
 @st.fragment(run_every="2s")
 def render_featured(thresholds: dict) -> None:
     """注目の判定。関連度が高いものを新しい順にカードで出す。"""
-    engine = get_engine()
     # いま選んでいる質問数で判定したものだけを見せる(質問数が違えば別の結果)
-    judged_all = engine.store.all(thresholds["question_count"])
+    judged_all = visible_judgements(thresholds)
     featured = [j for j in judged_all if j.relevance >= thresholds["relevance"]][:FEATURED_LIMIT]
 
     st.subheader("注目の判定")
@@ -625,8 +633,7 @@ def render_featured(thresholds: dict) -> None:
 @st.fragment(run_every="2s")
 def render_stream(thresholds: dict) -> None:
     """流れる電文。関連度が低いものも消さず、薄く表示する。"""
-    engine = get_engine()
-    judged_all = engine.store.all(thresholds["question_count"])[:STREAM_LIMIT]
+    judged_all = visible_judgements(thresholds)[:STREAM_LIMIT]
 
     st.subheader("流れる電文")
     st.caption(

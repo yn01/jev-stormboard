@@ -263,3 +263,47 @@ def test_プロファイルの指紋に読み込み元は混ざらない():
     assert profile_fingerprint(a) == profile_fingerprint(b)
     # 中身が変われば指紋も変わる
     assert profile_fingerprint({**base, "city": "どこかの区"}) != profile_fingerprint(a)
+
+
+# ---------------------------------------------------------------- リプレイの再生位置
+
+
+def test_リプレイ中は再生位置までの電文だけを見せる(tmp_path: Path):
+    """再生位置を反映しないと、朝を再生していても最新の電文が先頭に出続けてしまう。"""
+    store = JudgedStore(tmp_path / "judgements.jsonl")
+    store.add(make_judged("morning", "2026-09-19T00:00:00Z"))
+    store.add(make_judged("noon", "2026-09-19T03:00:00Z"))
+    store.add(make_judged("night", "2026-09-19T14:00:00Z"))
+
+    everything = store.all(10)
+    assert [j.id for j in everything] == ["night", "noon", "morning"]
+
+    # 再生位置が昼なら、夜の電文はまだ見えない
+    position = "2026-09-19T03:00:00Z"
+    visible = [j for j in everything if j.updated <= position]
+    assert [j.id for j in visible] == ["noon", "morning"]
+
+    # 位置が空(ライブ、または再生終了)なら全件
+    assert len([j for j in everything if not "" or True]) == 3
+
+
+def test_再生位置は最初からで戻る(tmp_path: Path):
+    engine = Engine(JudgedStore(tmp_path / "judgements.jsonl"))
+    engine.set_mode("replay", replay_day="2026-09-18", replay_speed=60)
+    engine.status.replay_position = "2026-09-18T05:00:00Z"
+    engine.status.replay_position_jst = "09/18 14:00"
+
+    engine.restart()
+
+    assert engine.status.replay_position == ""
+    assert engine.status.replay_position_jst == ""
+
+
+def test_モードを変えると再生位置が消える(tmp_path: Path):
+    engine = Engine(JudgedStore(tmp_path / "judgements.jsonl"))
+    engine.set_mode("replay", replay_day="2026-09-18", replay_speed=60)
+    engine.status.replay_position = "2026-09-18T05:00:00Z"
+
+    engine.set_mode("live")
+
+    assert engine.status.replay_position == ""

@@ -81,6 +81,9 @@ class Status:
     replay_speed: int = 1
     replay_done: int = 0
     replay_total: int = 0
+    # いま再生している電文の発表時刻(UTC表記)。画面はここまでの電文だけを見せる
+    replay_position: str = ""
+    replay_position_jst: str = ""
     queue_size: int = 0
     question_count: int = DEFAULT_QUESTION_COUNT
     profile_name: str = ""
@@ -185,6 +188,8 @@ class Engine:
             self.status.question_count = count
             self.status.replay_done = 0
             self.status.replay_total = 0
+            self.status.replay_position = ""
+            self.status.replay_position_jst = ""
             self.metrics.question_count = count
             if count_changed:
                 # 質問数が変わると結果も変わるので、ライブの位置を戻して判定し直す
@@ -214,6 +219,8 @@ class Engine:
         with self._lock:
             self._mode_generation += 1
             self.status.replay_done = 0
+            self.status.replay_position = ""
+            self.status.replay_position_jst = ""
         self._paused.clear()
         self.status.paused = False
         self._wake.set()
@@ -361,6 +368,8 @@ class Engine:
 
         self.status.replay_total = len(records)
         self.status.replay_done = 0
+        self.status.replay_position = ""
+        self.status.replay_position_jst = ""
         if not records:
             self.status.message = f"リプレイ: {day} の電文がありません"
             self._sleep(2.0)
@@ -389,10 +398,17 @@ class Engine:
                         return
             previous = current
 
+            # 再生位置を進める。画面はこの時刻までの電文だけを表示する
+            self.status.replay_position = record.updated
+            if current is not None:
+                self.status.replay_position_jst = current.astimezone(JST).strftime("%m/%d %H:%M")
+
             self._judge_one(record)
             self.status.replay_done += 1
 
         self.status.message = f"リプレイ: {day} の再生が終わりました({len(records)}件)"
+        self.status.replay_position = ""  # 終わったら全件を見せる
+        self.status.replay_position_jst = "再生終了"
         self._sleep(3.0)
 
     # ------------------------------------------------------------ 判定1件
