@@ -224,3 +224,45 @@ def test_索引から電文をIDで引ける(tmp_path: Path):
 
     # 最新は updated が新しいほう
     assert latest(records).title == "情報"
+
+
+# ---------------------------------------------------------------- プロファイルの読み込み
+
+
+def test_profile_localがあればそちらを優先する(tmp_path: Path, monkeypatch):
+    from core import judge as judge_mod
+
+    public = tmp_path / "profile.yaml"
+    local = tmp_path / "profile.local.yaml"
+    public.write_text("id: pub\nname: 公開用\npref: 東京都\nprofile: 仮\n", encoding="utf-8")
+
+    monkeypatch.setattr(judge_mod, "PROFILE_PATH", public)
+    monkeypatch.setattr(judge_mod, "LOCAL_PROFILE_PATH", local)
+
+    # local が無ければ公開用
+    assert judge_mod.profile_path() == public
+    profile = judge_mod.load_profile()
+    assert profile["name"] == "公開用"
+    assert profile["_source"] == "profile.yaml"
+    assert profile["_is_local"] is False
+
+    # local を置くとそちらが優先される
+    local.write_text("id: loc\nname: 自分用\npref: 東京都\nprofile: 実際\n", encoding="utf-8")
+    assert judge_mod.profile_path() == local
+    profile = judge_mod.load_profile()
+    assert profile["name"] == "自分用"
+    assert profile["_source"] == "profile.local.yaml"
+    assert profile["_is_local"] is True
+
+    # local を消すと公開用に戻る
+    local.unlink()
+    assert judge_mod.profile_path() == public
+
+
+def test_公開用プロファイルに市区町村を書かない():
+    from core.judge import PROFILE_PATH, load_profile
+
+    profile = load_profile(PROFILE_PATH)
+    # 公開用は府県予報区コード(6桁)までにとどめる。市区町村コードは7桁
+    assert len(str(profile["area_code"])) == 6
+    assert not profile.get("city")

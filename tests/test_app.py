@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from app.engine import INPUT_COST_PER_MTOK, Engine, Metrics
-from app.store import JudgedAnswer, JudgedMessage, JudgedStore
+from app.store import JudgedAnswer, JudgedMessage, JudgedStore, profile_fingerprint
 from core.message import IndexRecord
 
 
@@ -191,3 +191,75 @@ def test_同じモードを指定しても世代は上がらない(tmp_path: Pat
     engine.set_mode("replay", replay_day="2026-09-18", replay_speed=60)
     _, _, _, after = engine._current_mode()
     assert before == after
+
+
+# ---------------------------------------------------------------- 再生の操作
+
+
+def test_一時停止と再開ができる(tmp_path: Path):
+    engine = Engine(JudgedStore(tmp_path / "judgements.jsonl"))
+
+    assert engine.status.paused is False
+    engine.pause()
+    assert engine.status.paused is True
+    engine.resume()
+    assert engine.status.paused is False
+
+
+def test_最初からで世代が上がり進捗が戻る(tmp_path: Path):
+    engine = Engine(JudgedStore(tmp_path / "judgements.jsonl"))
+    engine.set_mode("replay", replay_day="2026-09-18", replay_speed=60)
+    _, _, _, before = engine._current_mode()
+    engine.status.replay_done = 120
+
+    engine.restart()
+
+    _, _, _, after = engine._current_mode()
+    assert after != before  # 進行中の再生が打ち切られる
+    assert engine._changed(before)
+    assert engine.status.replay_done == 0
+    assert engine.status.paused is False
+
+
+def test_最初からでも判定結果は消えない(tmp_path: Path):
+    """再生し直しても API を呼び直さないこと(キャッシュを壊さない)。"""
+    store = JudgedStore(tmp_path / "judgements.jsonl")
+    store.add(make_judged("id-1", "2026-09-18T01:00:00Z"))
+    engine = Engine(store)
+
+    engine.restart()
+
+    assert engine.store.count() == 1
+    assert engine.store.has("id-1", 10)
+
+
+def test_いますぐ確認でライブの位置が戻る(tmp_path: Path):
+    engine = Engine(JudgedStore(tmp_path / "judgements.jsonl"))
+    engine._live_cursor = "2026-09-19T01:00:00Z"
+
+    engine.refresh_now()
+    assert engine._live_cursor is None
+
+
+def test_最終判定からの経過時間(tmp_path: Path):
+    import time
+
+    engine = Engine(JudgedStore(tmp_path / "judgements.jsonl"))
+    # まだ判定していなければ None
+    assert engine.status.seconds_since_last_judge() is None
+
+    engine.status.last_judged_at = time.monotonic()
+    elapsed = engine.status.seconds_since_last_judge()
+    assert elapsed is not None and elapsed < 1.0
+
+
+def test_プロファイルの指紋に読み込み元は混ざらない():
+    """_source が違っても、中身が同じなら指紋は同じになること。"""
+    base = {"id": "x", "name": "n", "area_code": "130000", "pref": "東京都",
+            "city": "", "profile": "本文"}
+    a = {**base, "_source": "profile.yaml", "_is_local": False}
+    b = {**base, "_source": "profile.local.yaml", "_is_local": True}
+
+    assert profile_fingerprint(a) == profile_fingerprint(b)
+    # 中身が変われば指紋も変わる
+    assert profile_fingerprint({**base, "city": "世田谷区"}) != profile_fingerprint(a)
