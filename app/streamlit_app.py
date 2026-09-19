@@ -20,8 +20,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.engine import INPUT_COST_PER_MTOK, Engine, available_days  # noqa: E402
-from app.store import JudgedMessage  # noqa: E402
+from app.store import JudgedMessage, profile_fingerprint  # noqa: E402
 from core.judge import load_profile  # noqa: E402
+from core.questions import QUESTION_SET_SIZES  # noqa: E402
 
 JST = timezone(timedelta(hours=9), "JST")
 
@@ -51,8 +52,12 @@ def get_engine() -> Engine:
     return engine
 
 
-@st.cache_resource
 def get_profile() -> dict:
+    """profile.yaml を読む。
+
+    キャッシュしない。画面を再読み込みしたときに、書き換えた内容が
+    そのまま反映されるようにするため(小さな YAML なので毎回読んでよい)。
+    """
     return load_profile()
 
 
@@ -97,20 +102,25 @@ def answer_row(answer) -> str:
             f'<div style="display:flex;align-items:center;gap:8px;margin:3px 0;">'
             f'<div style="width:120px;font-size:0.85rem;">{answer.label}</div>'
             f'<div style="flex:1;">{bar(value, color)}</div>'
-            f'<div style="width:46px;text-align:right;font-size:0.85rem;">{value:.2f}</div>'
+            f'<div style="width:62px;text-align:right;font-size:0.85rem;'
+            f'font-variant-numeric:tabular-nums;">{value:.2f}</div>'
             "</div>"
         )
 
     if answer.kind == "score":
         value = float(answer.value)
-        # criteria は5段階(0〜4)なので、0〜1 に直して棒にする
-        ratio = value / 4.0
+        # 目盛りの範囲に対する比率でバーを描き、値にも「2.82 / 4」と範囲を併記する。
+        # 範囲が分からないと、数字もバーの長さも意味を持たないため。
+        ratio = answer.scale_ratio()
+        top = answer.scale_max
         color = "#dc2626" if ratio >= 0.7 else ("#2563eb" if ratio >= 0.4 else "#9ca3af")
+        shown = f"{value:.2f} / {top}" if top is not None else f"{value:.2f}"
         return (
             f'<div style="display:flex;align-items:center;gap:8px;margin:3px 0;">'
             f'<div style="width:120px;font-size:0.85rem;">{answer.label}</div>'
             f'<div style="flex:1;">{bar(ratio, color)}</div>'
-            f'<div style="width:46px;text-align:right;font-size:0.85rem;">{value:.2f}</div>'
+            f'<div style="width:62px;text-align:right;font-size:0.85rem;'
+            f'font-variant-numeric:tabular-nums;">{shown}</div>'
             "</div>"
         )
 
@@ -158,6 +168,7 @@ def render_card(judged: JudgedMessage, noul_threshold: float) -> None:
         st.caption(
             f"{judged.latency_ms:.0f}ms　{judged.question_count}問　"
             f"入力 {judged.input_tokens or 0:,}tok　{judged.model}"
+            + (f"　プロファイル {judged.profile_fingerprint}" if judged.profile_fingerprint else "")
         )
 
 
@@ -178,14 +189,32 @@ def render_sidebar() -> dict:
     )
 
     noul_threshold = st.sidebar.slider(
-        "Noulのしきい値(確信度)",
+        "判断がついた回答だけを濃く",
         min_value=0.0,
         max_value=1.0,
         value=0.0,
         step=0.05,
         help=(
-            "Noul は値そのものが「真である確率」なので、確信度は 0.5 からの距離 "
-            "abs(値-0.5)*2 で測ります。この値に満たない回答は薄く表示します。"
+            "Noul の値は「命題が真である確率」そのものなので、0.5 に近いほど"
+            "「どちらとも言えない」という意味になります。確信度は 0.5 からの距離 "
+            "abs(値-0.5)*2 で測り、この値に満たない回答をカード内で薄く表示します。"
+            "質問数を増やすと曖昧な回答も増えるので、上げると読みやすくなります。"
+        ),
+    )
+    st.sidebar.caption(
+        "↑ カード内で、0.5 付近(どちらとも言えない)の Noul を薄くします。"
+        "0 のままなら全部そのまま表示します。"
+    )
+
+    st.sidebar.divider()
+    question_count = st.sidebar.radio(
+        "質問数",
+        QUESTION_SET_SIZES,
+        format_func=lambda n: f"{n}問",
+        horizontal=True,
+        help=(
+            "1回のリクエストで送る質問の数です。切り替えると、その質問数で判定し直します。"
+            "質問数を増やしてもレイテンシがほとんど変わらないことを確かめてください。"
         ),
     )
 
@@ -209,6 +238,7 @@ def render_sidebar() -> dict:
         "replay" if mode_label == "リプレイ" else "live",
         replay_day=replay_day,
         replay_speed=replay_speed,
+        question_count=question_count,
     )
 
     st.sidebar.divider()
@@ -217,7 +247,11 @@ def render_sidebar() -> dict:
         "判定結果は `data/judged/` に保存され、同じ電文は二重に判定しません。"
         "リプレイを繰り返しても API のコストは増えません。"
     )
-    return {"relevance": relevance_threshold, "noul": noul_threshold}
+    return {
+        "relevance": relevance_threshold,
+        "noul": noul_threshold,
+        "question_count": question_count,
+    }
 
 
 # ---------------------------------------------------------------- 各セクション
@@ -241,7 +275,7 @@ def render_header(profile: dict) -> None:
 
 
 @st.fragment(run_every="2s")
-def render_metrics() -> None:
+def render_metrics(profile: dict) -> None:
     """指標の帯。2秒ごとに描画だけを更新する。"""
     engine = get_engine()
     m, s = engine.metrics, engine.status
@@ -255,6 +289,17 @@ def render_metrics() -> None:
     cols[5].metric(
         "推定コスト", f"${m.estimated_cost_usd:.4f}", help=f"入力 ${INPUT_COST_PER_MTOK}/MTok で計算"
     )
+
+    # 質問数を増やしてもレイテンシがほとんど変わらないことを、その場で見比べられるように
+    by_count = engine.store.average_latency_by_count()
+    if by_count:
+        parts = []
+        for count, (average, n) in by_count.items():
+            mark = "**" if count == m.question_count else ""
+            parts.append(f"{mark}{count}問 {average:.0f}ms{mark}（{n:,}件）")
+        st.caption("質問数別の平均レイテンシ:　" + "　/　".join(parts))
+
+    render_profile_notice(profile, engine)
 
     if s.rate_limited:
         st.warning(
@@ -271,11 +316,46 @@ def render_metrics() -> None:
     st.caption(f"{state}｜{s.message}{extra}")
 
 
+def render_profile_notice(profile: dict, engine: Engine) -> None:
+    """いま表示している判定が、どのプロファイルで出たものかを知らせる。
+
+    profile.yaml を書き換えると判定の前提が変わるので、過去の判定結果と
+    食い違っていることを画面に出す。
+    """
+    current = profile_fingerprint(profile)
+    stored = engine.store.profile_fingerprints()
+
+    legacy = not stored  # プロファイルを記録する前に判定したぶん
+    others = {f for f in stored if f != current}
+
+    if not others and not legacy:
+        return
+
+    lines = []
+    if others:
+        lines.append(
+            f"**別のプロファイルで判定された結果が混ざっています。**"
+            f"　いまの profile.yaml（{profile.get('name','')}・指紋 `{current}`）とは"
+            f"前提が異なる判定が {len(others)} 種類あります。"
+        )
+    if legacy:
+        lines.append(
+            "**プロファイルを記録する前に判定した結果が含まれています。**"
+            "　どのプロファイルで判定したかは分かりません。"
+        )
+    lines.append(
+        "新しい判定は、いまの profile.yaml で行われます。"
+        "過去のぶんを揃えたい場合は `data/judged/judgements.jsonl` を空にしてください。"
+    )
+    st.warning("\n\n".join(lines))
+
+
 @st.fragment(run_every="2s")
 def render_featured(thresholds: dict) -> None:
     """注目の判定。関連度が高いものを新しい順にカードで出す。"""
     engine = get_engine()
-    judged_all = engine.store.all()
+    # いま選んでいる質問数で判定したものだけを見せる(質問数が違えば別の結果)
+    judged_all = engine.store.all(thresholds["question_count"])
     featured = [j for j in judged_all if j.relevance >= thresholds["relevance"]][:FEATURED_LIMIT]
 
     st.subheader("注目の判定")
@@ -291,7 +371,10 @@ def render_featured(thresholds: dict) -> None:
                 "サイドバーで関連度のしきい値を下げると表示されます。"
             )
         else:
-            st.info("判定を待っています。最初の結果が出るまで少しかかります。")
+            st.info(
+                f"{thresholds['question_count']}問での判定を待っています。"
+                "最初の結果が出るまで少しかかります。"
+            )
         return
 
     for judged in featured:
@@ -302,7 +385,7 @@ def render_featured(thresholds: dict) -> None:
 def render_stream(thresholds: dict) -> None:
     """流れる電文。関連度が低いものも消さず、薄く表示する。"""
     engine = get_engine()
-    judged_all = engine.store.all()[:STREAM_LIMIT]
+    judged_all = engine.store.all(thresholds["question_count"])[:STREAM_LIMIT]
 
     st.subheader("流れる電文")
     st.caption(
@@ -360,7 +443,7 @@ def main() -> None:
     thresholds = render_sidebar()
 
     render_header(profile)
-    render_metrics()
+    render_metrics(profile)
     st.divider()
     render_featured(thresholds)
     st.divider()
