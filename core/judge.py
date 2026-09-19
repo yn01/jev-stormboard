@@ -22,7 +22,14 @@ from typing import Any
 import yaml
 
 from .message import IndexRecord, Message, extract, find_by_id, latest, load_index, read_message_file
-from .questions import QUESTIONS, Q, build_questions
+from .questions import (
+    DEFAULT_QUESTION_COUNT,
+    QUESTIONS,
+    Q,
+    build_questions,
+    scale_max,
+    select_questions,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 PROFILE_PATH = ROOT / "profile.yaml"
@@ -82,6 +89,7 @@ class Answer:
     value: Any  # 選択肢名 / 数値 / 0〜1 の確率
     probabilities: dict[Any, float]
     confidence: float | None  # Noul は None
+    scale_max: int | None = None  # Score の目盛りの最大値(0〜この値)。他の型は None
 
     @property
     def certainty(self) -> float:
@@ -98,6 +106,9 @@ class Answer:
         if self.kind == "noul":
             return f"{float(self.value):.3f}"
         if self.kind == "score":
+            # 目盛りの範囲が分かるよう「2.82 / 4」の形で出す
+            if self.scale_max is not None:
+                return f"{float(self.value):.2f} / {self.scale_max}"
             return f"{float(self.value):.2f}"
         return str(self.value)
 
@@ -167,6 +178,7 @@ def _to_answer(q: Q, raw: Any) -> Answer:
             value=raw.score,
             probabilities={int(k): v for k, v in raw.probabilities.items()},
             confidence=raw.confidence,
+            scale_max=scale_max(q.question),
         )
     # noul: 値そのものが「真である確率」。confidence は返らない
     return Answer(
@@ -180,11 +192,21 @@ def _to_answer(q: Q, raw: Any) -> Answer:
     )
 
 
-def judge(record: IndexRecord, profile: dict, client: Any = None) -> Judgement:
-    """電文1本を判定する。全問を1リクエストにまとめて送る。"""
+def judge(
+    record: IndexRecord,
+    profile: dict,
+    client: Any = None,
+    question_count: int | None = None,
+) -> Judgement:
+    """電文1本を判定する。全問を1リクエストにまとめて送る。
+
+    question_count を渡すと、QUESTIONS の先頭からその数だけを使う
+    (画面の「10問 / 30問 / 50問」の切り替え用)。
+    """
     message = extract(read_message_file(record.full_path))
     state = build_state(message, profile)
-    questions = build_questions()
+    questions = build_questions(question_count)
+    asked = select_questions(question_count)
 
     if client is None:
         load_api_key()
@@ -196,7 +218,7 @@ def judge(record: IndexRecord, profile: dict, client: Any = None) -> Judgement:
     response = client.system_one(state, questions)
     latency_ms = (time.perf_counter() - started) * 1000
 
-    answers = [_to_answer(q, response.answers[q.key]) for q in QUESTIONS]
+    answers = [_to_answer(q, response.answers[q.key]) for q in asked]
 
     log.info(
         "判定 %d問 / %.0fms / model=%s / 入力トークン=%s 出力トークン=%s",
@@ -301,6 +323,9 @@ def main(argv: list[str] | None = None) -> int:
     group.add_argument("--latest", action="store_true", help="最新の電文を判定する(既定)")
     group.add_argument("--id", type=str, default=None, help="電文ID(URL全体、またはファイル名)を指定して判定する")
     parser.add_argument("--profile", type=Path, default=None, help="プロファイルのYAML(既定: profile.yaml)")
+    parser.add_argument(
+        "--questions", type=int, default=None, help="使う質問数(先頭からこの数だけ。既定: 10)"
+    )
     parser.add_argument("--json", action="store_true", help="結果をJSONで出力する")
     args = parser.parse_args(argv)
 
@@ -320,7 +345,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     profile = load_profile(args.profile)
-    judgement = judge(record, profile)
+    count = args.questions if args.questions else DEFAULT_QUESTION_COUNT
+    judgement = judge(record, profile, question_count=count)
 
     if args.json:
         payload = {
@@ -340,6 +366,7 @@ def main(argv: list[str] | None = None) -> int:
                     "value": a.value,
                     "confidence": a.confidence,
                     "certainty": round(a.certainty, 4),
+                    "scale_max": a.scale_max,
                     "probabilities": {str(k): round(v, 4) for k, v in a.probabilities.items()},
                 }
                 for a in judgement.answers
