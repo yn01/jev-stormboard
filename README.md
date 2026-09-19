@@ -13,8 +13,12 @@
 
 ## 現在の段階
 
-- **第一段階(いま): ロガー** — 防災電文を取得して保存し続ける
-- 次の段階: Streamlit アプリ本体と Jev による判定、保存データを使ったリプレイ
+- **第一段階: ロガー** — 防災電文を取得して保存し続ける(稼働中)
+- **第二段階(いま): 判定コア** — 保存した電文1本を Jev で判定する
+- 次の段階: Streamlit アプリ本体、保存データを使ったリプレイ
+
+要件の一覧と進捗は [`requirements.md`](requirements.md) にまとめてあります
+(Python の依存関係ファイル `requirements.txt` とは別物です)。
 
 ## セットアップ
 
@@ -98,6 +102,12 @@ data/raw/2026-09-19/20260918175015_0_VPWW53_030000.xml.gz
 jev-stormboard/
 ├── CLAUDE.md
 ├── README.md
+├── requirements.md  # 要件リスト(開発の起点)
+├── profile.yaml     # 判定対象の人物プロファイル
+├── core/            # 判定コア (python -m core.judge)
+│   ├── questions.py # Jevへ送る質問の定義(足すだけで増える)
+│   ├── message.py   # 電文XMLの読み取り
+│   └── judge.py     # 判定とCLI
 ├── logger/          # ロガー本体 (python -m logger)
 │   ├── config.py    # 設定はすべてここ
 │   ├── feed.py      # フィードのパースと絞り込み
@@ -145,6 +155,49 @@ TITLE_EXCLUDES: tuple[str, ...] = ("大雨危険度通知",)
 
 再起動すると `data/index.jsonl` から保存済み ID を読み込むため、**重複せずに
 続きから保存**されます。停止していた間の電文は、起動時の穴埋めで回収されます。
+
+## 判定コア
+
+保存した電文1本を Jev に渡し、「この電文はこの人にとって何を意味するか」を
+10問まとめて判定します。
+
+```bash
+source .venv/bin/activate
+python -m core.judge --latest                    # 最新の電文を判定
+python -m core.judge --id 20260918223117_0_VPFJ50_120000   # 電文を指定して判定
+python -m core.judge --latest --json             # 結果をJSONで出力
+```
+
+判定対象の人物は [`profile.yaml`](profile.yaml) に1件だけ書いてあります。
+仮の内容なので、ご自身の状況に書き換えてください(書き換え箇所にコメントがあります)。
+
+質問は `core/questions.py` の `QUESTIONS` リストに定義しています。
+**リストに要素を足すだけで質問数が増えます。** 各質問には観点のタグ
+(message / plan / prepare / move / home / family / action)が付いていて、
+将来、観点ごとの絞り込みや画面でのグループ表示に使います。
+
+10問すべてを **1回のリクエスト**にまとめて送るため、質問を増やしても
+レイテンシはほとんど変わりません(10問で約600ms、11問でも約630ms)。
+
+### Noul の確信度について
+
+Jev の答えは型によって形が違います。
+
+| 型 | 値 | 確率 | 確信度 |
+| --- | --- | --- | --- |
+| Choice | 選択肢名 | 選択肢ごとの確率 | `confidence` |
+| Score | 数値 | 段階ごとの確率 | `confidence` |
+| Noul | 0〜1 | 値そのものが確率 | SDKは返さない |
+
+**Noul の値は「命題が真である確率」そのもの**で、Choice / Score の `confidence`
+(モデルがその答えをどれだけ確信しているか)とは意味が異なります。
+しきい値で絞り込むときは、Noul については `0.5` からの距離(`abs(値-0.5)*2`)を
+確信度の代わりに使います。表では `*` 付きで表示されます。
+
+### APIキー
+
+`TYPESAFE_API_KEY` を使います。環境変数が未設定の場合は
+`.claude/settings.local.json` の `env` から読みます(このファイルはコミットされません)。
 
 ## テスト
 
