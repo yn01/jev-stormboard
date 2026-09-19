@@ -84,8 +84,16 @@ class Status:
     queue_size: int = 0
     question_count: int = DEFAULT_QUESTION_COUNT
     profile_name: str = ""
+    profile_source: str = ""  # profile.yaml か profile.local.yaml か
     profile_fingerprint: str = ""
     profile_reloaded_at: str = ""
+    paused: bool = False
+    last_judged_at: float = 0.0  # 最後に判定した時刻(monotonic)
+
+    def seconds_since_last_judge(self) -> float | None:
+        if self.last_judged_at == 0.0:
+            return None
+        return time.monotonic() - self.last_judged_at
 
     @property
     def rate_limited(self) -> bool:
@@ -123,8 +131,12 @@ class Engine:
         # 画面から切り替える質問数。変えると未判定扱いになり、その数で判定し直す
         self._question_count = DEFAULT_QUESTION_COUNT
 
-        # profile.yaml の再読み込み用。ファイルの更新時刻が変わったら読み直す
+        # プロファイルの再読み込み用。ファイルの更新時刻が変わったら読み直す
         self._profile_mtime: float | None = None
+        self._profile_path: Path | None = None
+
+        # リプレイの一時停止。画面のボタンから切り替える
+        self._paused = threading.Event()
 
     # ------------------------------------------------------------ 起動と停止
 
@@ -179,6 +191,44 @@ class Engine:
                 self._live_cursor = None
         self._wake.set()
 
+    # ------------------------------------------------------------ 画面からの操作
+
+    def pause(self) -> None:
+        """リプレイを一時停止する。デモ中に説明しながら止めるため。"""
+        self._paused.set()
+        self.status.paused = True
+        self._wake.set()
+
+    def resume(self) -> None:
+        """一時停止を解除する。"""
+        self._paused.clear()
+        self.status.paused = False
+        self._wake.set()
+
+    def restart(self) -> None:
+        """リプレイを最初から再生し直す。
+
+        世代を上げて進行中の再生を打ち切るだけ。判定結果は消さないので、
+        すでに判定した電文は API を呼ばずにそのまま流れる。
+        """
+        with self._lock:
+            self._mode_generation += 1
+            self.status.replay_done = 0
+        self._paused.clear()
+        self.status.paused = False
+        self._wake.set()
+
+    def refresh_now(self) -> None:
+        """ライブモードで、いますぐ索引を見に行く。"""
+        self._live_cursor = None
+        self._wake.set()
+
+    def _wait_while_paused(self) -> None:
+        while self._paused.is_set() and not self._stop.is_set():
+            self.status.message = "リプレイ: 一時停止中"
+            self._wake.wait(timeout=0.3)
+            self._wake.clear()
+
     def _current_mode(self) -> tuple[str, str, int, int]:
         with self._lock:
             return self._mode, self._replay_day, self._replay_speed, self._mode_generation
@@ -224,13 +274,19 @@ class Engine:
 
         画面を再読み込みしたときに、書き換えたプロファイルが反映されるようにする。
         """
-        from core.judge import PROFILE_PATH
+        from core.judge import profile_path
 
+        # profile.local.yaml が増えたり消えたりしたら、読む先自体が変わる
+        target = profile_path()
         try:
-            mtime = PROFILE_PATH.stat().st_mtime
+            mtime = target.stat().st_mtime
         except OSError:
             return False
-        if self._profile_mtime is not None and mtime == self._profile_mtime:
+        if (
+            self._profile_mtime is not None
+            and mtime == self._profile_mtime
+            and target == self._profile_path
+        ):
             return False
         try:
             profile = load_profile()
@@ -240,10 +296,14 @@ class Engine:
 
         self._profile = profile
         self._profile_mtime = mtime
+        self._profile_path = target
         self.status.profile_name = str(profile.get("name", ""))
+        self.status.profile_source = str(profile.get("_source", target.name))
         self.status.profile_fingerprint = profile_fingerprint(profile)
         self.status.profile_reloaded_at = datetime.now(JST).strftime("%H:%M:%S")
-        log.info("profile.yaml を読み込みました (%s)", self.status.profile_fingerprint)
+        log.info(
+            "%s を読み込みました (%s)", self.status.profile_source, self.status.profile_fingerprint
+        )
         return True
 
     def _sleep(self, seconds: float) -> None:
@@ -313,6 +373,12 @@ class Engine:
             if self._stop.is_set() or self._changed(generation):
                 return
 
+            self._wait_while_paused()
+            if self._stop.is_set() or self._changed(generation):
+                return
+            if not self.status.paused:
+                self.status.message = f"リプレイ: {day} を {speed}倍速で再生中"
+
             current = self._updated_dt(record)
             if previous is not None and current is not None:
                 gap = (current - previous).total_seconds() / max(1, speed)
@@ -376,6 +442,7 @@ class Engine:
         self.metrics.input_tokens += judged.input_tokens or 0
         self.metrics.output_tokens += judged.output_tokens or 0
         self.metrics.question_count = judged.question_count
+        self.status.last_judged_at = time.monotonic()
         self.status.error = ""
 
     # ------------------------------------------------------------ 補助
