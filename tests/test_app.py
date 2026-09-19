@@ -262,4 +262,4 @@ def test_プロファイルの指紋に読み込み元は混ざらない():
 
     assert profile_fingerprint(a) == profile_fingerprint(b)
     # 中身が変われば指紋も変わる
-    assert profile_fingerprint({**base, "city": "世田谷区"}) != profile_fingerprint(a)
+    assert profile_fingerprint({**base, "city": "どこかの区"}) != profile_fingerprint(a)
