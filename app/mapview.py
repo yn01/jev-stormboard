@@ -276,7 +276,7 @@ MAP_STYLE = """
 .jev-map .home{fill:#38bdf8;stroke:#0b1220;stroke-width:1.2;}
 .jev-map .home-pulse{fill:#38bdf8;opacity:.55;animation:jevpulse 2.2s ease-out infinite;}
 @keyframes jevpulse{0%{r:4;opacity:.55}70%{r:16;opacity:0}100%{r:16;opacity:0}}
-.jev-legend{display:flex;align-items:center;gap:10px;margin-top:8px;font-size:.75rem;
+.jev-legend{display:flex;align-items:center;gap:10px;margin:8px 0 14px;font-size:.75rem;
   color:#94a3b8;}
 .jev-legend .bar{flex:1;height:9px;border-radius:5px;
   background:linear-gradient(90deg,#1e293b,#0e7490,#ca8a04,#ea580c,#ef4444);}

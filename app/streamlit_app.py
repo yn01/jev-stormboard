@@ -306,33 +306,34 @@ def render_sidebar() -> dict:
 # ---------------------------------------------------------------- 各セクション
 
 
-def render_header(profile: dict) -> None:
+def header_html(profile: dict) -> str:
+    """タイトルとプロファイル。1行に収める。"""
     where = f"{profile.get('pref', '')}{profile.get('city', '')}" or "地域未設定"
     source = profile.get("_source", "profile.yaml")
-    st.markdown(
-        f"### 🌀 jev-stormboard　"
-        f'<span style="font-size:1rem;color:{MUTED};">'
-        f"{profile.get('name', '')}（{where}）向けの判定"
-        f"</span>　"
-        f'<span style="font-size:0.75rem;color:{MUTED};opacity:.75;">'
-        f"読み込み元: {source}</span>",
-        unsafe_allow_html=True,
+    return (
+        '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">'
+        '<span style="font-size:1.25rem;font-weight:700;">🌀 jev-stormboard</span>'
+        f'<span style="font-size:0.9rem;color:{MUTED};">'
+        f"{profile.get('name', '')}（{where}）向けの判定</span>"
+        f'<span style="font-size:0.7rem;color:{MUTED};opacity:.7;">{source}</span>'
+        "</div>"
     )
 
 
 @st.fragment(run_every="0.2s")
-def render_mode_bar() -> None:
-    """モードの常時表示と操作ボタン。結論バナーのすぐ上に置く。
+def render_mode_bar(profile: dict) -> None:
+    """タイトル・プロファイル・モード・操作ボタンを1行にまとめた帯。
 
-    本番中にライブかリプレイかを迷わないよう、本文の上部にも出す。
-    リプレイの再生位置(時刻)が進むので、2秒ごとに描き直す。
+    本番中にライブかリプレイかを迷わないよう、本文の上部に出す。
+    縦を詰めて、関連度マップがスクロールなしで見えるようにする。
     """
     engine = get_engine()
     status = engine.status
 
-    left, right = st.columns([3, 2])
+    left, right = st.columns([3.2, 1.8])
 
     with left:
+        st.markdown(header_html(profile), unsafe_allow_html=True)
         if status.mode == "replay":
             state = "一時停止中" if status.paused else f"{status.replay_speed}倍速で再生中"
             progress = (
@@ -343,8 +344,8 @@ def render_mode_bar() -> None:
             clock = f"　⏱ {status.replay_position_jst}" if status.replay_position_jst else ""
             st.markdown(
                 '<div style="display:flex;align-items:center;gap:10px;padding:6px 12px;'
-                'background:rgba(124,58,237,.18);border:1px solid #a78bfa;border-radius:20px;'
-                'display:inline-flex;">'
+                'background:rgba(124,58,237,.18);border:1px solid #a78bfa;'
+                'border-radius:20px;margin-top:4px;display:inline-flex;">'
                 '<span style="width:10px;height:10px;border-radius:50%;background:#a78bfa;'
                 'display:inline-block;"></span>'
                 '<span style="font-weight:700;color:#c4b5fd;">リプレイ</span>'
@@ -363,8 +364,9 @@ def render_mode_bar() -> None:
                 elapsed = f"最終判定 {since / 60:.0f}分前"
             st.markdown(
                 "<style>@keyframes blink{0%,100%{opacity:1}50%{opacity:0.25}}</style>"
-                '<div style="display:inline-flex;align-items:center;gap:10px;padding:6px 12px;'
-                'background:rgba(34,197,94,.16);border:1px solid #4ade80;border-radius:20px;">'
+                '<div style="display:inline-flex;align-items:center;gap:8px;padding:3px 10px;'
+                'background:rgba(34,197,94,.16);border:1px solid #4ade80;'
+                'border-radius:20px;margin-top:4px;">'
                 '<span style="width:10px;height:10px;border-radius:50%;background:#4ade80;'
                 'display:inline-block;animation:blink 1.4s infinite;"></span>'
                 '<span style="font-weight:700;color:#86efac;">ライブ</span>'
@@ -400,10 +402,11 @@ def _supplement(judged: JudgedMessage, key: str) -> str:
     answer = judged.answer(key) if judged else None
     if answer is None:
         return (
-            f'<div style="flex:1;padding:8px 12px;background:{PANEL};border-radius:8px;'
-            f'border:1px solid {LINE};">'
-            f'<div style="font-size:0.75rem;color:{MUTED};">--</div>'
-            f'<div style="font-size:1.1rem;color:{MUTED};">--</div></div>'
+            f'<div style="flex:1;padding:10px 12px;background:{PANEL};border-radius:10px;'
+            f'border:1px solid {LINE};display:flex;flex-direction:column;'
+            f'justify-content:center;">'
+            f'<div style="font-size:0.72rem;color:{MUTED};">--</div>'
+            f'<div style="font-size:1.3rem;color:{MUTED};">--</div></div>'
         )
 
     ratio = answer.scale_ratio()
@@ -413,12 +416,13 @@ def _supplement(judged: JudgedMessage, key: str) -> str:
         shown = f"{float(answer.value):.2f}"
     color = "#f87171" if ratio >= 0.7 else ("#38bdf8" if ratio >= 0.4 else MUTED)
     return (
-        f'<div style="flex:1;padding:8px 12px;background:{PANEL};border-radius:8px;'
-        f'border:1px solid {LINE};">'
-        f'<div style="font-size:0.75rem;color:{MUTED};">{answer.label}</div>'
-        f'<div style="font-size:1.25rem;font-weight:600;color:{color};'
-        f'font-variant-numeric:tabular-nums;">{shown}</div>'
-        f'<div style="margin-top:4px;">{bar(ratio, color)}</div>'
+        f'<div style="flex:1;padding:10px 12px;background:{PANEL};border-radius:10px;'
+        f'border:1px solid {LINE};display:flex;flex-direction:column;'
+        f'justify-content:center;">'
+        f'<div style="font-size:0.72rem;color:{MUTED};">{answer.label}</div>'
+        f'<div style="font-size:1.3rem;font-weight:700;color:{color};'
+        f'font-variant-numeric:tabular-nums;line-height:1.2;">{shown}</div>'
+        f'<div style="margin-top:6px;">{bar(ratio, color)}</div>'
         "</div>"
     )
 
@@ -448,23 +452,25 @@ def render_conclusion(thresholds: dict) -> None:
             f"{jst_time(top.updated, '%m月%d日 %H:%M')} JST"
         )
 
-    st.markdown(
-        f'<div style="background:{background};border:2px solid {border};'
-        f'border-radius:10px;padding:16px 22px;margin:6px 0 10px;">'
-        f'<div style="font-size:0.78rem;color:{text};opacity:0.8;letter-spacing:0.08em;">'
+    # 結論と補足指標を横一列に並べる。結論の右が空くのを避け、
+    # 関連度マップをスクロールなしで見える位置まで押し上げるため。
+    conclusion = (
+        f'<div style="flex:2.3;background:{background};border:2px solid {border};'
+        f'border-radius:10px;padding:12px 18px;display:flex;flex-direction:column;'
+        f'justify-content:center;">'
+        f'<div style="font-size:0.72rem;color:{text};opacity:0.8;letter-spacing:0.08em;">'
         f"いま取るべき行動</div>"
-        f'<div style="font-size:2rem;font-weight:700;line-height:1.25;color:{text};'
+        f'<div style="font-size:1.7rem;font-weight:700;line-height:1.2;color:{text};'
         f'margin-top:2px;">{headline}</div>'
-        f'<div style="font-size:0.82rem;color:{text};opacity:0.85;margin-top:6px;">'
-        f"{sub}</div>"
-        "</div>",
-        unsafe_allow_html=True,
+        f'<div style="font-size:0.75rem;color:{text};opacity:0.85;margin-top:4px;'
+        f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{sub}</div>'
+        "</div>"
     )
+    supplements = "".join(_supplement(top, key) for key in ("imminent", "severity", "impact"))
 
-    # 第2層: 補足指標を3つだけ
-    parts = "".join(_supplement(top, key) for key in ("imminent", "severity", "impact"))
     st.markdown(
-        f'<div style="display:flex;gap:10px;margin-bottom:6px;">{parts}</div>',
+        f'<div style="display:flex;gap:10px;align-items:stretch;margin:2px 0 6px;">'
+        f"{conclusion}{supplements}</div>",
         unsafe_allow_html=True,
     )
 
@@ -685,6 +691,18 @@ def main() -> None:
     thresholds = render_sidebar()
     engine = get_engine()
 
+    # 画面上部の余白を詰めて、関連度マップをスクロールなしで見える位置に上げる
+    st.markdown(
+        "<style>"
+        # Streamlit の上部ツールバーは固定表示。これより上に詰めると先頭が隠れる
+        '[data-testid="stAppViewBlockContainer"],.block-container'
+        "{padding-top:3.6rem;padding-bottom:2rem;}"
+        'div[data-testid="stVerticalBlock"]{gap:.5rem;}'
+        "hr{margin:.5rem 0;}"
+        "</style>",
+        unsafe_allow_html=True,
+    )
+
     # リプレイ中は背景の色味を変えて、ライブと見間違えないようにする
     if engine.status.mode == "replay":
         st.markdown(
@@ -699,16 +717,13 @@ def main() -> None:
             unsafe_allow_html=True,
         )
 
-    # 第1層: 注意書き → モード → 結論
-    render_header(profile)
-    render_mode_bar()
+    # 第1層: ヘッダー+モード → 結論と補足指標(横一列)
+    render_mode_bar(profile)
     render_conclusion(thresholds)
 
-    st.divider()
-    # 第1.5層: 全国に流れる電文の中で、自分に関係するところだけが濃くなる地図。
-    # 重い場合に備えて折りたたみにできるが、主役なので初期状態は開いておく。
+    # 第1.5層: 大量に流れる電文の中で、自分に関係するところだけが濃くなる地図。
+    # スクロールなしで見えるよう、余計な区切りを入れずにすぐ下に置く。
     if st.session_state.get("show_map", True):
-        st.subheader("関連度マップ")
         render_map(thresholds, profile)
     else:
         st.caption("関連度マップは非表示です（サイドバーで表示できます）。")
