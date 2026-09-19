@@ -32,7 +32,13 @@ from .questions import (
 )
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# 公開用の仮プロファイル。リポジトリは public なので、ここには個人情報を書かない。
 PROFILE_PATH = ROOT / "profile.yaml"
+
+# 自分の実際の状況を書くファイル。.gitignore に入れてあり、コミットされない。
+# こちらがあれば優先して読む。
+LOCAL_PROFILE_PATH = ROOT / "profile.local.yaml"
 
 log = logging.getLogger("core.judge")
 
@@ -63,11 +69,27 @@ def load_api_key() -> None:
 # ---------------------------------------------------------------- プロファイル
 
 
+def profile_path() -> Path:
+    """実際に読むプロファイルのパス。
+
+    `profile.local.yaml` があればそちらを優先する。無ければ公開用の
+    `profile.yaml` を使う(requirements.md の「公開の方針」)。
+    """
+    return LOCAL_PROFILE_PATH if LOCAL_PROFILE_PATH.exists() else PROFILE_PATH
+
+
 def load_profile(path: Path | None = None) -> dict:
-    """profile.yaml を読む。"""
-    target = path or PROFILE_PATH
+    """プロファイルを読む。
+
+    path を渡さない場合は profile_path() が選んだファイルを読む。
+    どちらを読んだかは `_source` に入れて返す(画面に出すため)。
+    """
+    target = path or profile_path()
     with target.open(encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+        profile = yaml.safe_load(fh) or {}
+    profile["_source"] = target.name
+    profile["_is_local"] = target == LOCAL_PROFILE_PATH
+    return profile
 
 
 # ---------------------------------------------------------------- 判定結果

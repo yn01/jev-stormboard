@@ -10,6 +10,8 @@
 !/logs/**/.gitkeep
 
 # 秘密情報
+# 自分の実際の状況を書くプロファイル。絶対にコミットしない
+profile.local.yaml
 .claude/settings.local.json
 .env
 .env.*
