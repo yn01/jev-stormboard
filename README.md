@@ -224,7 +224,7 @@ streamlit run app/streamlit_app.py
 
 > **別プロジェクトの仮想環境で起動しないこと。**
 > `.venv` を有効にし忘れたり、ほかのプロジェクト（jev-intent など）の
-> `.venv/bin/streamlit` で起動すると、`plotly` や `httpx` が無くて
+> `.venv/bin/streamlit` で起動すると、`streamlit` や `PyYAML` などが無くて
 > `ModuleNotFoundError` になります。`which streamlit` で
 > `jev-stormboard/.venv/bin/streamlit` が出ることを確認してください。
 >
@@ -237,7 +237,7 @@ streamlit run app/streamlit_app.py
    変わります(通常どおり=緑 / 予定変更を検討=黄 / 今日中に備える=橙 /
    外出を控える=赤 / 早めの避難を検討=濃い赤)。すぐ下に、切迫している・
    事象の深刻さ・生活への影響度の3つを小さく添えます
-2. **関連度マップ**(日本地図) — 下記
+2. **関連度マップ**(関東圏) — 下記
 3. **注目の判定**(関連度が高い電文のカード)と**流れる電文**(判定した電文の一覧)
 4. **Jev の性能**(処理件数・レイテンシ・質問数・トークン・コスト)— 画面下部の
    折りたたみ。「状況」ではなく性能を示す数字なので下に置いています
