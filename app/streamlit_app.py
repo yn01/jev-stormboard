@@ -27,7 +27,6 @@ from app.mapview import (  # noqa: E402
     caption as map_caption,
     kanto_prefectures,
     legend_html,
-    top_prefectures,
 )
 from app.store import JudgedMessage, profile_fingerprint  # noqa: E402
 from core.judge import load_profile  # noqa: E402
@@ -358,7 +357,7 @@ def render_mode_bar(profile: dict) -> None:
 
     # タイトル / モードバッジ / 操作ボタン を横一列に。
     # バッジを結論バナーの真上に積むと、左側に要素が固まって見えるため。
-    left, middle, right = st.columns([2.5, 1.6, 1.9])
+    left, middle, right = st.columns([2.3, 1.8, 1.9])
 
     with left:
         st.markdown(header_html(profile), unsafe_allow_html=True)
@@ -371,17 +370,15 @@ def render_mode_bar(profile: dict) -> None:
             # 「09/20 00:01」の時刻部分だけ。日付はバッジの先頭に出ている
             position = status.replay_position_jst
             clock = f"　⏱ {position.split(' ')[-1]}" if position else ""
-            origin = f"　{status.replay_start}〜" if status.replay_start not in ("", "00:00") else ""
             st.markdown(
-                '<div style="display:flex;align-items:center;gap:10px;padding:6px 12px;'
-                'background:rgba(124,58,237,.18);border:1px solid #a78bfa;'
-                'border-radius:20px;margin-top:2px;display:inline-flex;">'
-                '<span style="width:10px;height:10px;border-radius:50%;background:#a78bfa;'
-                'display:inline-block;"></span>'
-                '<span style="font-weight:700;color:#c4b5fd;">リプレイ</span>'
+                '<div class="jev-modebar">'
+                '<span class="jev-badge" style="background:rgba(124,58,237,.18);'
+                'border-color:#a78bfa;">'
+                '<span class="dot" style="background:#a78bfa;"></span>'
+                '<b style="color:#c4b5fd;">リプレイ</b>'
                 f'<span style="color:#c4b5fd;font-size:0.78rem;">'
-                f"{status.replay_day[5:]}{origin}　{state}{clock}{progress}</span>"
-                "</div>",
+                f"{status.replay_day[5:]}　{state}{clock}{progress}</span>"
+                "</span></div>",
                 unsafe_allow_html=True,
             )
         else:
@@ -394,15 +391,14 @@ def render_mode_bar(profile: dict) -> None:
                 elapsed = f"最終判定 {since / 60:.0f}分前"
             st.markdown(
                 "<style>@keyframes blink{0%,100%{opacity:1}50%{opacity:0.25}}</style>"
-                '<div style="display:inline-flex;align-items:center;gap:8px;padding:3px 10px;'
-                'white-space:nowrap;'
-                'background:rgba(34,197,94,.16);border:1px solid #4ade80;'
-                'border-radius:20px;margin-top:2px;">'
-                '<span style="width:10px;height:10px;border-radius:50%;background:#4ade80;'
-                'display:inline-block;animation:blink 1.4s infinite;"></span>'
-                '<span style="font-weight:700;color:#86efac;">ライブ</span>'
-                f'<span style="color:#86efac;font-size:0.85rem;">{elapsed}</span>'
-                "</div>",
+                '<div class="jev-modebar">'
+                '<span class="jev-badge" style="background:rgba(34,197,94,.16);'
+                'border-color:#4ade80;">'
+                '<span class="dot" style="background:#4ade80;'
+                'animation:blink 1.4s infinite;"></span>'
+                '<b style="color:#86efac;">ライブ</b>'
+                f'<span style="color:#86efac;font-size:0.82rem;">{elapsed}</span>'
+                "</span></div>",
                 unsafe_allow_html=True,
             )
 
@@ -646,13 +642,15 @@ def render_map(thresholds: dict, profile: dict) -> None:
                 f'<div style="width:52px;text-align:right;">{severity}</div>'
                 "</div>"
             )
-        tops = top_prefectures(map_data, 1)
-        if tops:
+        # 地図は関東圏なので、注記も関東の中の1位にする。
+        # 全国の1位を出すと、一覧に無い県の名前が出て食い違って見える
+        top = next((s for s in stats if s.count and s.top_title), None)
+        if top:
             rows.append(
                 f'<div style="color:{MUTED};font-size:0.75rem;margin-top:10px;'
                 f'border-top:1px solid {LINE};padding-top:8px;">'
-                f"{tops[0].name}が最も高いのは、"
-                f"「{tops[0].top_title[:26]}」の判定によるものです。</div>"
+                f"{top.name}が最も高いのは、"
+                f"「{top.top_title[:26]}」の判定によるものです。</div>"
             )
         # 凡例は一覧の下に置く。一覧には色のバーと円が並んでいるので、
         # そのすぐ下にあると色と大きさの意味を突き合わせやすい
@@ -788,6 +786,15 @@ def main() -> None:
         "{padding-top:3.6rem;padding-bottom:2rem;}"
         'div[data-testid="stVerticalBlock"]{gap:.5rem;}'
         "hr{margin:.5rem 0;}"
+        # モードのバッジ。1行に固定し、入りきらなければ省略記号にする。
+        # 折り返すと高さが伸びて、下の結論バナーに重なってしまうため。
+        ".jev-modebar{min-height:32px;display:flex;align-items:center;overflow:hidden;}"
+        ".jev-badge{display:inline-flex;align-items:center;gap:8px;padding:3px 12px;"
+        "border-radius:20px;border:1px solid;white-space:nowrap;overflow:hidden;"
+        "text-overflow:ellipsis;max-width:100%;}"
+        ".jev-badge .dot{width:9px;height:9px;border-radius:50%;display:inline-block;"
+        "flex:none;}"
+        ".jev-badge b{flex:none;}"
         # 使えないボタンは見えなくする。場所は取ったままにして、
         # 画面の要素の並びが変わらないようにする(差分のずれを防ぐため)
         '[data-testid="stButton"] button:disabled'
