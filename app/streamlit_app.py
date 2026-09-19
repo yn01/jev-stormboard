@@ -25,6 +25,7 @@ from app.mapview import (  # noqa: E402
     MAP_STYLE,
     build_svg,
     caption as map_caption,
+    kanto_prefectures,
     legend_html,
     top_prefectures,
 )
@@ -312,7 +313,6 @@ def header_html(profile: dict) -> str:
     読み込み元は、自分用の profile.local.yaml を使っているときだけ出す。
     公開用の profile.yaml のときは既定なので、出すと横幅を食うだけになる。
     """
-    where = f"{profile.get('pref', '')}{profile.get('city', '')}" or "地域未設定"
     local = (
         f'<span style="font-size:0.7rem;color:#38bdf8;opacity:.85;">'
         f"{profile.get('_source', '')}</span>"
@@ -323,8 +323,6 @@ def header_html(profile: dict) -> str:
         '<div style="display:flex;align-items:baseline;gap:8px;white-space:nowrap;'
         'overflow:hidden;text-overflow:ellipsis;">'
         '<span style="font-size:1.2rem;font-weight:700;">🌀 jev-stormboard</span>'
-        f'<span style="font-size:0.85rem;color:{MUTED};overflow:hidden;'
-        f'text-overflow:ellipsis;">{profile.get("name", "")}（{where}）向けの判定</span>'
         f"{local}"
         "</div>"
     )
@@ -491,7 +489,7 @@ def render_conclusion(thresholds: dict) -> None:
     supplements = "".join(_supplement(top, key) for key in ("imminent", "severity", "impact"))
 
     st.markdown(
-        f'<div style="display:flex;gap:10px;align-items:stretch;margin:2px 0 6px;">'
+        f'<div style="display:flex;gap:10px;align-items:stretch;margin:2px 0 14px;">'
         f"{conclusion}{supplements}</div>",
         unsafe_allow_html=True,
     )
@@ -586,37 +584,56 @@ def render_map(thresholds: dict, profile: dict) -> None:
         st.markdown(MAP_STYLE + build_svg(map_data, profile) + legend_html(),
                     unsafe_allow_html=True)
     with right:
-        st.markdown(
-            f'<div style="font-size:0.8rem;color:{MUTED};margin-bottom:6px;">'
-            "関連度の高い地域</div>",
-            unsafe_allow_html=True,
-        )
-        tops = top_prefectures(map_data)
-        rows = []
-        if not tops:
+        stats = kanto_prefectures(map_data)
+        rows = [
+            '<div style="display:flex;gap:8px;font-size:0.68rem;color:#64748b;'
+            f'border-bottom:1px solid {LINE};padding-bottom:4px;margin-bottom:2px;">'
+            '<div style="width:52px;">地域</div>'
+            '<div style="flex:1;">関連度</div>'
+            '<div style="width:34px;text-align:right;">値</div>'
+            '<div style="width:52px;text-align:right;">深刻さ</div>'
+            "</div>"
+        ]
+        if not stats:
             rows.append(
                 f'<div style="color:{MUTED};font-size:0.82rem;">まだ判定した電文がありません。</div>'
             )
-        for stat in tops:
+        for stat in stats:
             color = (
-                "#f87171" if stat.relevance >= 0.75
-                else "#fb923c" if stat.relevance >= 0.5
-                else MUTED
+                "#d946ef" if stat.relevance >= 0.75
+                else "#7c3aed" if stat.relevance >= 0.5
+                else "#475569"
+            )
+            # 深刻さは地図と同じく円の大きさで見せる(色も地図に合わせる)
+            ratio = stat.severity_ratio
+            dot = "#ef4444" if ratio >= 0.7 else "#fbbf24"
+            radius = 3 + 5 * ratio
+            severity = (
+                f'<svg width="20" height="20" style="vertical-align:middle;">'
+                f'<circle cx="10" cy="10" r="{radius:.1f}" fill="{dot}" fill-opacity=".22" '
+                f'stroke="{dot}" stroke-width="1.4"/></svg>'
+                f'<span style="font-size:0.72rem;color:{dot};'
+                f'font-variant-numeric:tabular-nums;">{stat.severity:.1f}</span>'
+                if stat.count
+                else f'<span style="color:#475569;font-size:0.72rem;">--</span>'
             )
             rows.append(
-                '<div style="display:flex;align-items:center;gap:8px;margin:5px 0;">'
-                f'<div style="width:62px;font-size:0.85rem;">{stat.name}</div>'
+                '<div style="display:flex;align-items:center;gap:8px;margin:3px 0;">'
+                f'<div style="width:52px;font-size:0.8rem;">{stat.name[:-1]}</div>'
                 f'<div style="flex:1;">{bar(stat.relevance, color)}</div>'
-                f'<div style="width:38px;text-align:right;font-size:0.85rem;'
+                f'<div style="width:34px;text-align:right;font-size:0.8rem;'
                 f'font-variant-numeric:tabular-nums;color:{color};">'
                 f"{stat.relevance:.2f}</div>"
+                f'<div style="width:52px;text-align:right;">{severity}</div>'
                 "</div>"
             )
+        tops = top_prefectures(map_data, 1)
         if tops:
             rows.append(
-                f'<div style="color:{MUTED};font-size:0.78rem;margin-top:8px;">'
+                f'<div style="color:{MUTED};font-size:0.75rem;margin-top:10px;'
+                f'border-top:1px solid {LINE};padding-top:8px;">'
                 f"{tops[0].name}が最も高いのは、"
-                f"「{tops[0].top_title[:22]}」の判定によるものです。</div>"
+                f"「{tops[0].top_title[:26]}」の判定によるものです。</div>"
             )
         st.markdown("".join(rows), unsafe_allow_html=True)
 

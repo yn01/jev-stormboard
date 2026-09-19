@@ -74,14 +74,28 @@ def prefecture_names() -> dict[str, str]:
 
 @dataclass
 class PrefectureStat:
-    """都道府県1つぶんの集計。"""
+    """都道府県1つぶんの集計。
+
+    地図では2つの軸を別々に見せる。
+    - relevance : Jev が判定した「自分にとっての関連度」。面の色になる
+    - severity  : 電文が示す事象の深刻さ。中央の円の大きさになる
+
+    色だけで両方を表すと、関連度が高いのか警報が強いのか区別がつかない。
+    """
 
     code: str
     name: str
     count: int = 0  # その地域を対象とする判定済み電文の数
-    relevance: float = 0.0  # relevant の最大値。地図の色の濃さになる
+    relevance: float = 0.0  # relevant の最大値。面の色の濃さになる
+    severity: float = 0.0  # severity の最大値(0〜4)。円の大きさになる
+    severity_max: int = 4  # severity の目盛りの最大値
     top_title: str = ""  # relevant が最大だった電文
     top_action: str = ""
+
+    @property
+    def severity_ratio(self) -> float:
+        top = self.severity_max or 0
+        return self.severity / top if top else 0.0
 
 
 @dataclass
@@ -126,4 +140,16 @@ def build_map_data(judged_messages) -> MapData:
             stat.relevance = judged.relevance
             stat.top_title = judged.title or judged.kind
             stat.top_action = judged.action
+
+        # 深刻さは、その地域でいちばん重い事象を見たいので最大値を取る
+        answer = judged.answer("severity")
+        if answer is not None:
+            try:
+                value = float(answer.value)
+            except (TypeError, ValueError):
+                value = 0.0
+            if value > stat.severity:
+                stat.severity = value
+                if answer.scale_max:
+                    stat.severity_max = int(answer.scale_max)
     return data

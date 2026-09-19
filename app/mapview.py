@@ -30,17 +30,25 @@ VIEW_W = 640.0
 VIEW_H = 460.0
 PADDING = 14.0
 
-# 関連度の色。暗い背景に映えるシアン→アンバー→レッド
+# 関連度の色。**赤や橙は使わない。** 警報の強さと見間違えられるため、
+# 青 → インディゴ → 紫 → マゼンタ の系統にする(requirements.md R-95)。
 COLOR_STOPS: tuple[tuple[float, tuple[int, int, int]], ...] = (
     (0.00, (30, 41, 59)),     # 情報はあるが関係が薄い(濃いグレー)
-    (0.25, (14, 116, 144)),   # くすんだシアン
-    (0.50, (202, 138, 4)),    # アンバー
-    (0.75, (234, 88, 12)),    # オレンジ
-    (1.00, (239, 68, 68)),    # レッド
+    (0.25, (30, 64, 175)),    # 濃い青
+    (0.50, (67, 56, 202)),    # インディゴ
+    (0.75, (124, 58, 237)),   # 紫
+    (1.00, (217, 70, 239)),   # マゼンタ
 )
 EMPTY_FILL = "#131c2b"   # まだ電文が無い地域
 STROKE = "#0b1220"
-STROKE_HOT = "#fde68a"
+STROKE_HOT = "#f0abfc"   # 関連度が高い地域の縁取り(淡いマゼンタ)
+
+# 事象の深刻さ(円)の色。こちらは警報らしい琥珀〜赤でよい。
+# 面の色(青紫)と色相が離れているので、2つの軸を混同しない。
+SEVERITY_FILL = "#fbbf24"
+SEVERITY_HOT = "#ef4444"
+SEVERITY_MIN_R = 3.0   # 円の最小半径
+SEVERITY_MAX_R = 13.0  # 円の最大半径
 
 
 def _mix(a: tuple[int, int, int], b: tuple[int, int, int], t: float) -> str:
@@ -183,6 +191,7 @@ def build_svg(map_data: MapData, profile: dict) -> str:
     projection = _projection()
 
     polygons: list[str] = []
+    severity_dots: list[str] = []
     labels: list[str] = []
     for code, name, path in shapes:
         stat = map_data.stats.get(code)
@@ -197,7 +206,9 @@ def build_svg(map_data: MapData, profile: dict) -> str:
         opacity = 1.0 if has_message else 0.55
 
         title = (
-            f"{name}｜関連度 {relevance:.2f}｜電文 {stat.count}件"
+            f"{name}｜関連度 {relevance:.2f}"
+            f"｜深刻さ {stat.severity:.2f}/{stat.severity_max}"
+            f"｜電文 {stat.count}件"
             if has_message
             else f"{name}｜まだ電文がありません"
         )
@@ -206,13 +217,28 @@ def build_svg(map_data: MapData, profile: dict) -> str:
             f'stroke-width="{1.2 if hot else 0.6}" opacity="{opacity}"{glow}>'
             f"<title>{title}</title></path>"
         )
-        if has_message and relevance >= 0.5:
-            # 濃い地域だけ、名前と数値を重ねる
+        if has_message:
             cx, cy = _label_point(path)
-            labels.append(
-                f'<text x="{cx:.1f}" y="{cy:.1f}" class="lbl">{name[:-1]}</text>'
-                f'<text x="{cx:.1f}" y="{cy + 13:.1f}" class="val">{relevance:.2f}</text>'
-            )
+            # 事象の深刻さは、面の色ではなく円の大きさで表す。
+            # 色で両方を表すと、関連度が高いのか警報が強いのか区別がつかない。
+            ratio = stat.severity_ratio
+            if ratio > 0:
+                radius = SEVERITY_MIN_R + (SEVERITY_MAX_R - SEVERITY_MIN_R) * ratio
+                color = SEVERITY_HOT if ratio >= 0.7 else SEVERITY_FILL
+                severity_dots.append(
+                    f'<circle class="sev" cx="{cx:.1f}" cy="{cy:.1f}" r="{radius:.1f}" '
+                    f'fill="{color}" fill-opacity="0.22" stroke="{color}" '
+                    f'stroke-width="1.8">'
+                    f"<title>{title}</title></circle>"
+                )
+            if relevance >= 0.5:
+                # 名前と数値は円の下に置く。円と重ねると両方読みにくい
+                offset = SEVERITY_MIN_R + (SEVERITY_MAX_R - SEVERITY_MIN_R) * ratio + 11
+                labels.append(
+                    f'<text x="{cx:.1f}" y="{cy + offset:.1f}" class="lbl">{name[:-1]}</text>'
+                    f'<text x="{cx:.1f}" y="{cy + offset + 13:.1f}" class="val">'
+                    f"{relevance:.2f}</text>"
+                )
 
     # 居住地の目印(脈打つ点)
     marker = ""
@@ -236,6 +262,7 @@ def build_svg(map_data: MapData, profile: dict) -> str:
       </filter>
     </defs>
     {"".join(polygons)}
+    {"".join(severity_dots)}
     {"".join(labels)}
     {marker}
   </svg>
@@ -266,7 +293,7 @@ def _label_point(path: str) -> tuple[float, float]:
 MAP_STYLE = """
 <style>
 .jev-map{background:radial-gradient(circle at 50% 35%,#0f1a2e 0%,#0b1220 70%);
-  border:1px solid #1e293b;border-radius:10px;padding:6px;}
+  border:1px solid #1e293b;border-radius:10px;padding:6px;margin-top:10px;}
 .jev-map svg{width:100%;height:auto;display:block;}
 .jev-map .pref{transition:fill .8s ease,opacity .8s ease,stroke .8s ease;}
 .jev-map .lbl{fill:#f8fafc;font-size:11px;font-weight:700;text-anchor:middle;
@@ -276,23 +303,55 @@ MAP_STYLE = """
 .jev-map .home{fill:#38bdf8;stroke:#0b1220;stroke-width:1.2;}
 .jev-map .home-pulse{fill:#38bdf8;opacity:.55;animation:jevpulse 2.2s ease-out infinite;}
 @keyframes jevpulse{0%{r:4;opacity:.55}70%{r:16;opacity:0}100%{r:16;opacity:0}}
-.jev-legend{display:flex;align-items:center;gap:10px;margin:8px 0 14px;font-size:.75rem;
-  color:#94a3b8;}
-.jev-legend .bar{flex:1;height:9px;border-radius:5px;
-  background:linear-gradient(90deg,#1e293b,#0e7490,#ca8a04,#ea580c,#ef4444);}
+.jev-legend{display:flex;align-items:center;gap:22px;margin:10px 0 4px;font-size:.72rem;
+  color:#94a3b8;flex-wrap:wrap;}
+.jev-legend .axis{display:flex;align-items:center;gap:8px;}
+.jev-legend .cap{color:#64748b;}
+.jev-legend .bar{width:130px;height:9px;border-radius:5px;
+  background:linear-gradient(90deg,#1e293b,#1e40af,#4338ca,#7c3aed,#d946ef);}
+.jev-legend .dots{display:inline-flex;align-items:center;}
+.jev-legend .ends{color:#64748b;white-space:nowrap;}
+.jev-note{font-size:.72rem;color:#94a3b8;margin:0 0 12px;}
+.jev-note b{color:#f0abfc;}
+.jev-map .sev{pointer-events:none;transition:r .8s ease,fill .8s ease,stroke .8s ease;}
 </style>
 """
 
 
 def legend_html() -> str:
-    """凡例。色が「関連度」であって警報の強さではないことを明示する。"""
+    """凡例。2つの軸が別のものだと分かるように、並べて出す。
+
+    - 面の色 = Jev が判定した「自分にとっての関連度」
+    - 円の大きさ = 電文が示す「事象の深刻さ」
+    """
     return (
         '<div class="jev-legend">'
-        '<span style="white-space:nowrap;">関連度 低</span>'
+        # 面の色 = 関連度
+        '<span class="axis">'
+        '<b style="color:#c4b5fd;">面の色</b>'
+        '<span class="cap">あなたにとっての関連度</span>'
         '<span class="bar"></span>'
-        '<span style="white-space:nowrap;">高</span>'
-        '<span style="color:#f87171;white-space:nowrap;margin-left:6px;">'
-        "※警報の強さではありません</span>"
+        '<span class="ends">低 → 高</span>'
+        "</span>"
+        # 円 = 深刻さ
+        '<span class="axis">'
+        f'<b style="color:{SEVERITY_FILL};">円の大きさ</b>'
+        '<span class="cap">事象の深刻さ（警報の強さ）</span>'
+        '<span class="dots">'
+        f'<svg viewBox="0 0 92 26" width="92" height="26">'
+        f'<circle cx="10" cy="13" r="4" fill="{SEVERITY_FILL}" fill-opacity=".3" '
+        f'stroke="{SEVERITY_FILL}" stroke-width="1.2"/>'
+        f'<circle cx="34" cy="13" r="7" fill="{SEVERITY_FILL}" fill-opacity=".3" '
+        f'stroke="{SEVERITY_FILL}" stroke-width="1.2"/>'
+        f'<circle cx="64" cy="13" r="11" fill="{SEVERITY_HOT}" fill-opacity=".3" '
+        f'stroke="{SEVERITY_HOT}" stroke-width="1.2"/>'
+        "</svg></span>"
+        '<span class="ends">弱 → 強</span>'
+        "</span>"
+        "</div>"
+        '<div class="jev-note">'
+        "色の濃さは<b>警報の強さではありません</b>。"
+        "色が濃く、円も大きい地域が「自分にとって重大」です。"
         "</div>"
     )
 
@@ -302,8 +361,6 @@ def caption(map_data: MapData) -> str:
     in_view = set(kanto_codes_in_view())
     covered = sum(1 for code, s in map_data.stats.items() if code in in_view and s.count)
     parts = [
-        "色の濃さは、この電文がプロファイルの人物にとって**どれだけ関係するか**を "
-        "Jev が判定した結果（relevant）です。**警報の強さではありません。**",
         f"関東圏の {covered}/{len(in_view)} 都県に判定済みの電文があります"
         f"（全国では {map_data.covered} 都道府県）。",
     ]
@@ -321,3 +378,14 @@ def top_prefectures(map_data: MapData, limit: int = 6) -> list:
     """関連度の高い都道府県。地図の横に並べて、色の意味を数字でも見せる。"""
     with_message = [s for s in map_data.stats.values() if s.count]
     return sorted(with_message, key=lambda s: s.relevance, reverse=True)[:limit]
+
+
+def kanto_prefectures(map_data: MapData) -> list:
+    """地図に描いている関東の都県を、関連度の高い順に返す。
+
+    地図の横に8件すべて並べる。6件だけだと下が空くうえ、
+    2つの軸(関連度と深刻さ)を数字でも突き合わせられるようにしたい。
+    """
+    codes = set(kanto_codes_in_view())
+    stats = [s for code, s in map_data.stats.items() if code in codes]
+    return sorted(stats, key=lambda s: (s.relevance, s.count), reverse=True)

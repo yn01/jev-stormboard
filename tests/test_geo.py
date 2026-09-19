@@ -23,8 +23,19 @@ from app.geo import (
 DATA_URL = "https://www.data.jma.go.jp/developer/xml/data/"
 
 
-def make(message_id: str, relevance: float = 0.5, title: str = "電文", action: str = "通常どおり"):
+def make(
+    message_id: str,
+    relevance: float = 0.5,
+    title: str = "電文",
+    action: str = "通常どおり",
+    severity: float | None = None,
+):
     """地図の集計に必要な最小限の形だけを持つ、判定結果の代わり。"""
+
+    class StubAnswer:
+        def __init__(self, value: float) -> None:
+            self.value = value
+            self.scale_max = 4
 
     class Stub:
         id = message_id
@@ -35,6 +46,12 @@ def make(message_id: str, relevance: float = 0.5, title: str = "電文", action:
             self.title = title
             self.relevance = relevance
             self.action = action
+            self._severity = severity
+
+        def answer(self, key: str):
+            if key == "severity" and self._severity is not None:
+                return StubAnswer(self._severity)
+            return None
 
     return Stub()
 
@@ -138,6 +155,41 @@ def test_全国対象の電文は地図に塗らない():
     assert data.covered == 1
 
 
+def test_深刻さは最大値を取る():
+    """その地域でいちばん重い事象を見たいので、平均ではなく最大値。"""
+    judged = [
+        make(DATA_URL + "a_0_VPWW53_130000.xml", relevance=0.9, severity=1.2),
+        make(DATA_URL + "b_0_VPWW53_130000.xml", relevance=0.3, severity=3.4),
+    ]
+    data = build_map_data(judged)
+
+    tokyo = data.stats["13"]
+    # 関連度と深刻さは別の電文から来てよい(別の軸なので)
+    assert tokyo.relevance == pytest.approx(0.9)
+    assert tokyo.severity == pytest.approx(3.4)
+    assert tokyo.severity_max == 4
+    assert tokyo.severity_ratio == pytest.approx(0.85)
+
+
+def test_深刻さが無い電文でも落ちない():
+    data = build_map_data([make(DATA_URL + "a_0_VPWW53_130000.xml", relevance=0.9)])
+    tokyo = data.stats["13"]
+    assert tokyo.severity == 0.0
+    assert tokyo.severity_ratio == 0.0
+
+
+def test_関連度の色に赤や橙を使わない():
+    """警報の強さと見間違えられないよう、青紫系にする。"""
+    from app.mapview import relevance_color
+
+    for value in (0.0, 0.25, 0.5, 0.75, 1.0):
+        color = relevance_color(value)
+        red = int(color[1:3], 16)
+        blue = int(color[5:7], 16)
+        # どの段階でも、赤より青のほうが強いこと
+        assert blue >= red, f"{value}: {color} が赤寄り"
+
+
 def test_電文の無い都道府県は数えない():
     data = build_map_data([make(DATA_URL + "a_0_VPWW53_130000.xml", relevance=0.8)])
 
@@ -188,15 +240,32 @@ def test_SVGが組み立てられる():
     # 関連度が高い東京都はラベルが出る
     assert "0.90" in svg
 
-    assert "警報の強さではありません" in legend_html()
+    legend = legend_html()
+    # 2つの軸が別物だと分かること
+    assert "面の色" in legend and "円の大きさ" in legend
+    assert "関連度" in legend and "深刻さ" in legend
+    assert "警報の強さではありません" in legend
 
+    # 「警報の強さではない」は凡例で言い切るので、説明文は出典と件数を受け持つ
     text = caption(data)
-    assert "警報の強さではありません" in text
     assert "地球地図日本" in text
     assert "全国を対象とする電文 1 件" in text
 
     tops = top_prefectures(data)
     assert tops[0].name == "東京都"
+
+
+def test_深刻さが円として描かれる():
+    from app.mapview import build_svg
+
+    judged = [make(DATA_URL + "a_0_VPWW53_130000.xml", relevance=0.9, severity=3.5)]
+    data = build_map_data(judged)
+    svg = build_svg(data, {"lat": 35.68, "lon": 139.69})
+
+    assert 'class="sev"' in svg
+    # 深刻さが無ければ円は出ない
+    empty = build_svg(build_map_data([make(DATA_URL + "b_0_VPWW53_130000.xml")]), {})
+    assert 'class="sev"' not in empty
 
 
 def test_関東圏だけを描く():
