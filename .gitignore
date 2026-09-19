@@ -4,6 +4,7 @@
 !/data/
 !/data/raw/
 !/data/replay/
+!/data/judged/
 !/logs/
 !/data/**/.gitkeep
 !/logs/**/.gitkeep
