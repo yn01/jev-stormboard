@@ -22,6 +22,8 @@ def make_judged(
     action: str = "通常どおり",
     latency_ms: float = 300.0,
     input_tokens: int = 4000,
+    question_count: int = 10,
+    profile_fp: str = "abc123",
 ) -> JudgedMessage:
     return JudgedMessage(
         id=message_id,
@@ -35,8 +37,10 @@ def make_judged(
         model="jev-1.13.0",
         input_tokens=input_tokens,
         output_tokens=280,
-        question_count=10,
+        question_count=question_count,
         judged_at="2026-09-19T01:00:00+00:00",
+        profile_id="person-001",
+        profile_fingerprint=profile_fp,
         answers=[
             JudgedAnswer("relevant", "この地域に関係する", "message", "noul", relevant, None,
                          abs(relevant - 0.5) * 2, {"真": relevant, "偽": 1 - relevant}),
@@ -55,14 +59,14 @@ def test_判定結果を保存して読み直せる(tmp_path: Path):
     store.add(make_judged("id-1", "2026-09-19T01:00:00Z", relevant=0.9))
 
     assert store.count() == 1
-    assert store.has("id-1")
+    assert store.has("id-1", 10)
 
     # 再起動に相当: 同じファイルから読み直す
     revived = JudgedStore(path)
     assert revived.count() == 1
-    assert revived.has("id-1")
+    assert revived.has("id-1", 10)
 
-    judged = revived.get("id-1")
+    judged = revived.get("id-1", 10)
     assert judged is not None
     assert judged.relevance == pytest.approx(0.9)
     assert judged.answers[0].key == "relevant"
@@ -73,13 +77,13 @@ def test_同じ電文を二重に保存しない(tmp_path: Path):
     store.add(make_judged("id-1", "2026-09-19T01:00:00Z"))
 
     # has が真なら、呼び出し側は判定をしない
-    assert store.has("id-1")
+    assert store.has("id-1", 10)
     assert store.count() == 1
 
     # 同じ id を再度入れても件数は増えない(後の内容で上書きされる)
     store.add(make_judged("id-1", "2026-09-19T01:00:00Z", relevant=0.1))
     assert store.count() == 1
-    assert store.get("id-1").relevance == pytest.approx(0.1)
+    assert store.get("id-1", 10).relevance == pytest.approx(0.1)
 
 
 def test_壊れた行があっても読み込める(tmp_path: Path):
@@ -91,7 +95,7 @@ def test_壊れた行があっても読み込める(tmp_path: Path):
 
     revived = JudgedStore(path)
     assert revived.count() == 1
-    assert revived.has("id-1")
+    assert revived.has("id-1", 10)
 
 
 def test_新しい順に並ぶ(tmp_path: Path):
@@ -122,7 +126,7 @@ def test_関連度でしきい値を切れる(tmp_path: Path):
 def test_Noulの確信度は0_5からの距離になる(tmp_path: Path):
     store = JudgedStore(tmp_path / "judgements.jsonl")
     store.add(make_judged("id-1", "2026-09-19T01:00:00Z", relevant=0.9))
-    answer = store.get("id-1").answer("relevant")
+    answer = store.get("id-1", 10).answer("relevant")
 
     assert answer.confidence is None  # Noul に confidence は無い
     assert answer.certainty == pytest.approx(0.8)
@@ -131,7 +135,7 @@ def test_Noulの確信度は0_5からの距離になる(tmp_path: Path):
 def test_choiceは上位の確率を取り出せる(tmp_path: Path):
     store = JudgedStore(tmp_path / "judgements.jsonl")
     store.add(make_judged("id-1", "2026-09-19T01:00:00Z", action="外出を控える"))
-    answer = store.get("id-1").answer("action")
+    answer = store.get("id-1", 10).answer("action")
 
     tops = answer.top_probabilities(2)
     assert tops[0] == ("外出を控える", pytest.approx(0.6))

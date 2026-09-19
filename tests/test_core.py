@@ -107,12 +107,42 @@ def test_本文が長すぎる場合は切り詰める():
 # ---------------------------------------------------------------- 質問の定義
 
 
-def test_初期値は10問で全問が1リクエストにまとまる():
-    assert len(QUESTIONS) == 10
-    questions = build_questions()
-    assert len(questions) == 10
-    # キーが重複していない
-    assert len({q.key for q in QUESTIONS}) == 10
+def test_質問は50問あり重複がない():
+    assert len(QUESTIONS) == 50
+    assert len({q.key for q in QUESTIONS}) == 50
+
+
+def test_質問数を切り替えられる():
+    from core.questions import QUESTION_SET_SIZES, select_questions
+
+    assert QUESTION_SET_SIZES == (10, 30, 50)
+    for size in QUESTION_SET_SIZES:
+        assert len(select_questions(size)) == size
+        assert len(build_questions(size)) == size
+
+    # 先頭10問は基本の10問のまま(並び順がそのまま出題順になる)
+    assert [q.key for q in select_questions(10)][:3] == ["message_kind", "imminent", "severity"]
+    # 30問セットは10問セットをそのまま含む
+    assert [q.key for q in select_questions(10)] == [q.key for q in select_questions(30)][:10]
+
+
+def test_質問数の指定は範囲に収まる():
+    from core.questions import select_questions
+
+    assert len(select_questions(0)) == 1  # 最低1問
+    assert len(select_questions(999)) == 50  # 定義数が上限
+    assert len(select_questions(None)) == 50
+
+
+def test_Scoreの目盛りの最大値を取り出せる():
+    from core.questions import scale_max
+
+    # criteria が5段階なら 0〜4 なので最大値は 4
+    assert scale_max(by_key("severity").question) == 4
+    assert scale_max(by_key("impact").question) == 4
+    # Score 以外は目盛りを持たない
+    assert scale_max(by_key("relevant").question) is None
+    assert scale_max(by_key("action").question) is None
 
 
 def test_質問はリストに足すだけで増える():
@@ -124,14 +154,16 @@ def test_質問はリストに足すだけで増える():
     extended = QUESTIONS + [extra]
 
     questions = {q.key: q.question for q in extended}
-    assert len(questions) == 11
+    assert len(questions) == 51
     assert "extra_q" in questions
 
 
 def test_各質問に観点のタグがついている():
     assert all(q.aspect for q in QUESTIONS)
-    assert "message" in aspects()
     assert by_key("action").aspect == "action"
+    # 移動・備え・住まい・周囲・仕事の観点が揃っている
+    for aspect in ("message", "move", "prepare", "home", "family", "work"):
+        assert aspect in aspects()
 
 
 def test_3つの型をすべて使っている():
