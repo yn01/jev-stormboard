@@ -9,9 +9,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
-import tempfile
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -23,6 +23,39 @@ from core.message import IndexRecord
 ROOT = Path(__file__).resolve().parent.parent
 JUDGED_DIR = ROOT / "data" / "judged"
 JUDGED_PATH = JUDGED_DIR / "judgements.jsonl"
+
+
+def _scale_max_of(answer_data: dict) -> int | None:
+    """保存済みの答えから Score の目盛り最大値を取り出す。
+
+    以前に保存したぶんには scale_max が無いので、その場合は
+    probabilities のキー(段階の番号)から推測する。
+    """
+    if answer_data.get("scale_max") is not None:
+        return int(answer_data["scale_max"])
+    if answer_data.get("kind") != "score":
+        return None
+    keys: list[int] = []
+    for key in (answer_data.get("probabilities") or {}):
+        try:
+            keys.append(int(key))
+        except (TypeError, ValueError):
+            continue
+    return max(keys) if keys else None
+
+
+def profile_fingerprint(profile: dict) -> str:
+    """プロファイルの指紋(短いハッシュ)。
+
+    判定結果に「どのプロファイルで判定したか」を残すために使う。
+    プロファイルを書き換えると指紋が変わるので、過去の判定結果と
+    食い違っていることを画面で知らせられる。
+    """
+    keys = ("id", "name", "area_code", "pref", "city", "profile")
+    payload = json.dumps(
+        {k: str(profile.get(k, "")) for k in keys}, ensure_ascii=False, sort_keys=True
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
 
 @dataclass
@@ -37,9 +70,27 @@ class JudgedAnswer:
     confidence: float | None
     certainty: float
     probabilities: dict[str, float] = field(default_factory=dict)
+    scale_max: int | None = None  # Score の目盛りの最大値(0〜この値)
 
     def top_probabilities(self, n: int = 2) -> list[tuple[str, float]]:
         return sorted(self.probabilities.items(), key=lambda kv: kv[1], reverse=True)[:n]
+
+    def scale_ratio(self) -> float:
+        """バーの長さに使う 0〜1 の比率。
+
+        Score は目盛りの範囲に対する比率にする(範囲が分からないと
+        バーの長さが意味を持たないため)。
+        """
+        try:
+            value = float(self.value)
+        except (TypeError, ValueError):
+            return 0.0
+        if self.kind == "score":
+            top = self.scale_max or 0
+            return value / top if top > 0 else 0.0
+        if self.kind == "noul":
+            return value
+        return 0.0
 
 
 @dataclass
@@ -59,7 +110,14 @@ class JudgedMessage:
     output_tokens: int | None
     question_count: int
     judged_at: str
+    profile_id: str = ""  # どのプロファイルで判定したか
+    profile_fingerprint: str = ""  # プロファイルの指紋(変更の検知に使う)
     answers: list[JudgedAnswer] = field(default_factory=list)
+
+    @property
+    def cache_key(self) -> str:
+        """キャッシュの見出し。質問数が違えば別の結果になるので、電文IDと組にする。"""
+        return f"{self.id}#{self.question_count}"
 
     # -------------------------------------------------- 取り出し
 
@@ -105,6 +163,8 @@ class JudgedMessage:
             "output_tokens": self.output_tokens,
             "question_count": self.question_count,
             "judged_at": self.judged_at,
+            "profile_id": self.profile_id,
+            "profile_fingerprint": self.profile_fingerprint,
             "answers": [
                 {
                     "key": a.key,
@@ -114,6 +174,7 @@ class JudgedMessage:
                     "value": a.value,
                     "confidence": a.confidence,
                     "certainty": round(a.certainty, 4),
+                    "scale_max": a.scale_max,
                     "probabilities": {str(k): round(v, 4) for k, v in a.probabilities.items()},
                 }
                 for a in self.answers
@@ -136,6 +197,8 @@ class JudgedMessage:
             output_tokens=data.get("output_tokens"),
             question_count=int(data.get("question_count", 0)),
             judged_at=data.get("judged_at", ""),
+            profile_id=data.get("profile_id", ""),
+            profile_fingerprint=data.get("profile_fingerprint", ""),
             answers=[
                 JudgedAnswer(
                     key=a["key"],
@@ -146,13 +209,16 @@ class JudgedMessage:
                     confidence=a.get("confidence"),
                     certainty=float(a.get("certainty", 0.0)),
                     probabilities={k: float(v) for k, v in (a.get("probabilities") or {}).items()},
+                    scale_max=_scale_max_of(a),
                 )
                 for a in data.get("answers", [])
             ],
         )
 
     @classmethod
-    def from_judgement(cls, judgement: Judgement, record: IndexRecord) -> "JudgedMessage":
+    def from_judgement(
+        cls, judgement: Judgement, record: IndexRecord, profile: dict | None = None
+    ) -> "JudgedMessage":
         return cls(
             id=record.id,
             title=judgement.message.title or record.title,
@@ -167,6 +233,8 @@ class JudgedMessage:
             output_tokens=judgement.output_tokens,
             question_count=len(judgement.answers),
             judged_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            profile_id=str((profile or {}).get("id", "")),
+            profile_fingerprint=profile_fingerprint(profile or {}),
             answers=[
                 JudgedAnswer(
                     key=a.key,
@@ -177,6 +245,7 @@ class JudgedMessage:
                     confidence=a.confidence,
                     certainty=a.certainty,
                     probabilities={str(k): float(v) for k, v in a.probabilities.items()},
+                    scale_max=a.scale_max,
                 )
                 for a in judgement.answers
             ],
@@ -193,7 +262,7 @@ class JudgedStore:
         self.path = path or JUDGED_PATH
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        self._by_id: dict[str, JudgedMessage] = {}
+        self._by_key: dict[str, JudgedMessage] = {}
         self._load()
 
     def _load(self) -> None:
@@ -209,34 +278,67 @@ class JudgedStore:
                     judged = JudgedMessage.from_json(json.loads(line))
                 except (json.JSONDecodeError, KeyError, ValueError):
                     continue
-                # 同じ電文が複数行あれば、後の行(新しい判定)で上書きする
-                self._by_id[judged.id] = judged
+                # 同じ電文・同じ質問数が複数行あれば、後の行(新しい判定)で上書きする
+                self._by_key[judged.cache_key] = judged
 
     # -------------------------------------------------- 参照
 
-    def has(self, message_id: str) -> bool:
-        with self._lock:
-            return message_id in self._by_id
+    @staticmethod
+    def key_of(message_id: str, question_count: int) -> str:
+        return f"{message_id}#{question_count}"
 
-    def get(self, message_id: str) -> JudgedMessage | None:
-        with self._lock:
-            return self._by_id.get(message_id)
+    def has(self, message_id: str, question_count: int) -> bool:
+        """その電文を、その質問数で判定済みか。
 
-    def all(self) -> list[JudgedMessage]:
-        """新しい順(電文の発表時刻)に並べて返す。"""
+        10問と50問では結果が違うので、質問数ごとに別扱いにする。
+        """
         with self._lock:
-            items = list(self._by_id.values())
+            return self.key_of(message_id, question_count) in self._by_key
+
+    def get(self, message_id: str, question_count: int) -> JudgedMessage | None:
+        with self._lock:
+            return self._by_key.get(self.key_of(message_id, question_count))
+
+    def all(self, question_count: int | None = None) -> list[JudgedMessage]:
+        """新しい順(電文の発表時刻)に並べて返す。
+
+        question_count を渡すと、その質問数で判定したものだけに絞る。
+        """
+        with self._lock:
+            items = list(self._by_key.values())
+        if question_count is not None:
+            items = [j for j in items if j.question_count == question_count]
         return sorted(items, key=lambda j: j.updated, reverse=True)
 
-    def count(self) -> int:
+    def count(self, question_count: int | None = None) -> int:
+        if question_count is None:
+            with self._lock:
+                return len(self._by_key)
+        return len(self.all(question_count))
+
+    def average_latency_by_count(self) -> dict[int, tuple[float, int]]:
+        """質問数ごとの平均レイテンシと件数。
+
+        「質問数を増やしてもレイテンシがほとんど変わらない」ことを
+        画面で見せるために使う(requirements.md R-61)。
+        """
+        totals: dict[int, list[float]] = {}
         with self._lock:
-            return len(self._by_id)
+            items = list(self._by_key.values())
+        for judged in items:
+            totals.setdefault(judged.question_count, []).append(judged.latency_ms)
+        return {n: (sum(v) / len(v), len(v)) for n, v in sorted(totals.items()) if v}
+
+    def profile_fingerprints(self) -> set[str]:
+        """保存済みの判定が、どのプロファイルで行われたか。"""
+        with self._lock:
+            return {j.profile_fingerprint for j in self._by_key.values() if j.profile_fingerprint}
 
     # -------------------------------------------------- 追記
 
     def add(self, judged: JudgedMessage) -> None:
         with self._lock:
-            self._by_id[judged.id] = judged
+            self._by_key[judged.cache_key] = judged
         self._append(judged)
 
     def _append(self, judged: JudgedMessage) -> None:
