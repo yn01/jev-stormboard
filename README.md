@@ -218,8 +218,9 @@ streamlit run app/streamlit_app.py
 
 ブラウザで http://localhost:8501 が開きます。
 
-画面は**ダークテーマ**です(`.streamlit/config.toml`)。表示は **0.2秒ごと**に
-更新されます。
+画面は**ダークテーマ**です(`.streamlit/config.toml`)。表示は **1秒ごと**に
+更新されます(`app/streamlit_app.py` の `run_every`)。短くするほど Streamlit の
+通信が詰まりやすくなるので、変えたときは一度通しで触って確認してください。
 
 > **別プロジェクトの仮想環境で起動しないこと。**
 > `.venv` を有効にし忘れたり、ほかのプロジェクト（jev-intent など）の

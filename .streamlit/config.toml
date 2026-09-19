@@ -11,6 +11,10 @@ font = "sans serif"
 
 [server]
 headless = true
+# 画面を短い間隔で更新するので、メッセージのやり取りが多い。
+# 既定のままだと送ったメッセージがキャッシュから先に消えて
+# 「Cached ForwardMsg MISS」で接続が切れることがあるため、長めに保持する。
+maxCachedMessageAge = 300
 
 [browser]
 gatherUsageStats = false

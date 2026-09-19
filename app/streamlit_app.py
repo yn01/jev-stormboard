@@ -307,20 +307,29 @@ def render_sidebar() -> dict:
 
 
 def header_html(profile: dict) -> str:
-    """タイトルとプロファイル。1行に収める。"""
+    """タイトルとプロファイル。1行に収める。
+
+    読み込み元は、自分用の profile.local.yaml を使っているときだけ出す。
+    公開用の profile.yaml のときは既定なので、出すと横幅を食うだけになる。
+    """
     where = f"{profile.get('pref', '')}{profile.get('city', '')}" or "地域未設定"
-    source = profile.get("_source", "profile.yaml")
+    local = (
+        f'<span style="font-size:0.7rem;color:#38bdf8;opacity:.85;">'
+        f"{profile.get('_source', '')}</span>"
+        if profile.get("_is_local")
+        else ""
+    )
     return (
-        '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">'
-        '<span style="font-size:1.25rem;font-weight:700;">🌀 jev-stormboard</span>'
-        f'<span style="font-size:0.9rem;color:{MUTED};">'
-        f"{profile.get('name', '')}（{where}）向けの判定</span>"
-        f'<span style="font-size:0.7rem;color:{MUTED};opacity:.7;">{source}</span>'
+        '<div style="display:flex;align-items:baseline;gap:8px;white-space:nowrap;'
+        'overflow:hidden;text-overflow:ellipsis;">'
+        '<span style="font-size:1.2rem;font-weight:700;">🌀 jev-stormboard</span>'
+        f'<span style="font-size:0.85rem;color:{MUTED};overflow:hidden;'
+        f'text-overflow:ellipsis;">{profile.get("name", "")}（{where}）向けの判定</span>'
+        f"{local}"
         "</div>"
     )
 
 
-@st.fragment(run_every="0.2s")
 def render_mode_bar(profile: dict) -> None:
     """タイトル・プロファイル・モード・操作ボタンを1行にまとめた帯。
 
@@ -330,27 +339,30 @@ def render_mode_bar(profile: dict) -> None:
     engine = get_engine()
     status = engine.status
 
-    left, right = st.columns([3.2, 1.8])
+    # タイトル / モードバッジ / 操作ボタン を横一列に。
+    # バッジを結論バナーの真上に積むと、左側に要素が固まって見えるため。
+    left, middle, right = st.columns([2.5, 1.6, 1.9])
 
     with left:
         st.markdown(header_html(profile), unsafe_allow_html=True)
+
+    with middle:
         if status.mode == "replay":
-            state = "一時停止中" if status.paused else f"{status.replay_speed}倍速で再生中"
-            progress = (
-                f"　{status.replay_done:,}/{status.replay_total:,}件"
-                if status.replay_total
-                else ""
-            )
-            clock = f"　⏱ {status.replay_position_jst}" if status.replay_position_jst else ""
+            state = "一時停止" if status.paused else f"{status.replay_speed}倍"
+            # 件数まで入れると横に収まらないので、状態と時刻だけにする
+            progress = ""
+            # 「09/20 00:01」の時刻部分だけ。日付はバッジの先頭に出ている
+            position = status.replay_position_jst
+            clock = f"　⏱ {position.split(' ')[-1]}" if position else ""
             st.markdown(
                 '<div style="display:flex;align-items:center;gap:10px;padding:6px 12px;'
                 'background:rgba(124,58,237,.18);border:1px solid #a78bfa;'
-                'border-radius:20px;margin-top:4px;display:inline-flex;">'
+                'border-radius:20px;margin-top:2px;display:inline-flex;">'
                 '<span style="width:10px;height:10px;border-radius:50%;background:#a78bfa;'
                 'display:inline-block;"></span>'
                 '<span style="font-weight:700;color:#c4b5fd;">リプレイ</span>'
-                f'<span style="color:#c4b5fd;font-size:0.85rem;">'
-                f"{status.replay_day}　{state}{clock}{progress}</span>"
+                f'<span style="color:#c4b5fd;font-size:0.78rem;">'
+                f"{status.replay_day[5:]}　{state}{clock}{progress}</span>"
                 "</div>",
                 unsafe_allow_html=True,
             )
@@ -365,8 +377,9 @@ def render_mode_bar(profile: dict) -> None:
             st.markdown(
                 "<style>@keyframes blink{0%,100%{opacity:1}50%{opacity:0.25}}</style>"
                 '<div style="display:inline-flex;align-items:center;gap:8px;padding:3px 10px;'
+                'white-space:nowrap;'
                 'background:rgba(34,197,94,.16);border:1px solid #4ade80;'
-                'border-radius:20px;margin-top:4px;">'
+                'border-radius:20px;margin-top:2px;">'
                 '<span style="width:10px;height:10px;border-radius:50%;background:#4ade80;'
                 'display:inline-block;animation:blink 1.4s infinite;"></span>'
                 '<span style="font-weight:700;color:#86efac;">ライブ</span>'
@@ -376,25 +389,35 @@ def render_mode_bar(profile: dict) -> None:
             )
 
     with right:
-        if status.mode == "replay":
-            cols = st.columns(3)
-            if status.paused:
-                if cols[0].button("▶ 再生", use_container_width=True):
-                    engine.resume()
-                    st.rerun(scope="app")
-            else:
-                if cols[0].button("⏸ 一時停止", use_container_width=True):
-                    engine.pause()
-                    st.rerun(scope="app")
-            if cols[1].button("⏮ 最初から", use_container_width=True):
-                engine.restart()
-                st.rerun(scope="app")
-            if cols[2].button("↻ 更新", use_container_width=True):
-                st.rerun(scope="app")
-        else:
-            if st.button("↻ いますぐ確認", use_container_width=True):
+        # ボタンは常に3つ置く。モードで数が変わると、部分更新の差分が
+        # 画面の要素の並びと合わなくなって描画が壊れるため(Bad delta path index)。
+        replay = status.mode == "replay"
+        cols = st.columns(3)
+
+        play_label = "▶ 再生" if status.paused else "⏸ 停止"
+        if cols[0].button(
+            play_label if replay else "―",
+            use_container_width=True,
+            disabled=not replay,
+            key="btn_play",
+        ):
+            engine.resume() if status.paused else engine.pause()
+
+        if cols[1].button(
+            "⏮ 先頭" if replay else "―",
+            use_container_width=True,
+            disabled=not replay,
+            key="btn_restart",
+        ):
+            engine.restart()
+
+        if cols[2].button(
+            "↻ 更新" if replay else "↻ 確認",
+            use_container_width=True,
+            key="btn_refresh",
+        ):
+            if not replay:
                 engine.refresh_now()
-                st.rerun(scope="app")
 
 
 def _supplement(judged: JudgedMessage, key: str) -> str:
@@ -427,7 +450,6 @@ def _supplement(judged: JudgedMessage, key: str) -> str:
     )
 
 
-@st.fragment(run_every="0.2s")
 def render_conclusion(thresholds: dict) -> None:
     """第1層: いま取るべき行動を1つだけ、大きく出す。
 
@@ -475,7 +497,6 @@ def render_conclusion(thresholds: dict) -> None:
     )
 
 
-@st.fragment(run_every="0.2s")
 def render_metrics(profile: dict) -> None:
     """指標の帯。2秒ごとに描画だけを更新する。"""
     engine = get_engine()
@@ -552,7 +573,6 @@ def render_profile_notice(profile: dict, engine: Engine) -> None:
     st.warning("\n\n".join(lines))
 
 
-@st.fragment(run_every="0.2s")
 def render_map(thresholds: dict, profile: dict) -> None:
     """関連度のヒートマップ。
 
@@ -572,9 +592,11 @@ def render_map(thresholds: dict, profile: dict) -> None:
             unsafe_allow_html=True,
         )
         tops = top_prefectures(map_data)
-        if not tops:
-            st.caption("まだ判定した電文がありません。")
         rows = []
+        if not tops:
+            rows.append(
+                f'<div style="color:{MUTED};font-size:0.82rem;">まだ判定した電文がありません。</div>'
+            )
         for stat in tops:
             color = (
                 "#f87171" if stat.relevance >= 0.75
@@ -590,17 +612,17 @@ def render_map(thresholds: dict, profile: dict) -> None:
                 f"{stat.relevance:.2f}</div>"
                 "</div>"
             )
-        st.markdown("".join(rows), unsafe_allow_html=True)
         if tops:
-            st.caption(
+            rows.append(
+                f'<div style="color:{MUTED};font-size:0.78rem;margin-top:8px;">'
                 f"{tops[0].name}が最も高いのは、"
-                f"「{tops[0].top_title[:22]}」の判定によるものです。"
+                f"「{tops[0].top_title[:22]}」の判定によるものです。</div>"
             )
+        st.markdown("".join(rows), unsafe_allow_html=True)
 
     st.caption(map_caption(map_data))
 
 
-@st.fragment(run_every="0.2s")
 def render_featured(thresholds: dict) -> None:
     """注目の判定。関連度が高いものを新しい順にカードで出す。"""
     # いま選んでいる質問数で判定したものだけを見せる(質問数が違えば別の結果)
@@ -614,23 +636,18 @@ def render_featured(thresholds: dict) -> None:
     )
 
     if not featured:
-        if judged_all:
-            st.info(
-                "しきい値を超える電文はまだありません。"
-                "サイドバーで関連度のしきい値を下げると表示されます。"
-            )
-        else:
-            st.info(
-                f"{thresholds['question_count']}問での判定を待っています。"
-                "最初の結果が出るまで少しかかります。"
-            )
+        message = (
+            "しきい値を超える電文はまだありません。サイドバーで関連度のしきい値を下げてください。"
+            if judged_all
+            else f"{thresholds['question_count']}問での判定を待っています。"
+        )
+        st.caption(message)
         return
 
     for judged in featured:
         render_card(judged, thresholds["noul"])
 
 
-@st.fragment(run_every="0.2s")
 def render_stream(thresholds: dict) -> None:
     """流れる電文。関連度が低いものも消さず、薄く表示する。"""
     judged_all = visible_judgements(thresholds)[:STREAM_LIMIT]
@@ -686,6 +703,39 @@ def render_stream(thresholds: dict) -> None:
 # ---------------------------------------------------------------- 画面
 
 
+@st.fragment(run_every="1s")
+def render_upper(profile: dict, thresholds: dict) -> None:
+    """画面の上半分(ヘッダー・モード・結論・補足指標・地図)。
+
+    細かく分けて部分更新すると、サイドバーの操作で全体が再実行されたときに
+    差分の宛先がずれて描画が壊れる(Bad delta path index)。まとめて1つにして、
+    中の要素の並びが変わらないようにしてある。
+    """
+    render_mode_bar(profile)
+    render_conclusion(thresholds)
+
+    # 大量に流れる電文の中で、自分に関係するところだけが濃くなる地図。
+    # スクロールなしで見えるよう、余計な区切りを入れずにすぐ下に置く。
+    if st.session_state.get("show_map", True):
+        render_map(thresholds, profile)
+    else:
+        st.caption("関連度マップは非表示です（サイドバーで表示できます）。")
+
+
+@st.fragment(run_every="1s")
+def render_lower(profile: dict, thresholds: dict) -> None:
+    """画面の下半分(注目の判定・流れる電文・Jevの性能)。"""
+    render_featured(thresholds)
+    st.divider()
+    render_stream(thresholds)
+
+    # Jev の性能を示す数字。状況ではないので下に置く。
+    # ただしデモの主張として重要なので、初期状態は開いておく。
+    st.divider()
+    with st.expander("Jev の性能（処理件数・レイテンシ・トークン・コスト）", expanded=True):
+        render_metrics(profile)
+
+
 def main() -> None:
     profile = get_profile()
     thresholds = render_sidebar()
@@ -699,6 +749,10 @@ def main() -> None:
         "{padding-top:3.6rem;padding-bottom:2rem;}"
         'div[data-testid="stVerticalBlock"]{gap:.5rem;}'
         "hr{margin:.5rem 0;}"
+        # 使えないボタンは見えなくする。場所は取ったままにして、
+        # 画面の要素の並びが変わらないようにする(差分のずれを防ぐため)
+        '[data-testid="stButton"] button:disabled'
+        "{opacity:0;pointer-events:none;border-color:transparent;}"
         "</style>",
         unsafe_allow_html=True,
     )
@@ -717,27 +771,9 @@ def main() -> None:
             unsafe_allow_html=True,
         )
 
-    # 第1層: ヘッダー+モード → 結論と補足指標(横一列)
-    render_mode_bar(profile)
-    render_conclusion(thresholds)
-
-    # 第1.5層: 大量に流れる電文の中で、自分に関係するところだけが濃くなる地図。
-    # スクロールなしで見えるよう、余計な区切りを入れずにすぐ下に置く。
-    if st.session_state.get("show_map", True):
-        render_map(thresholds, profile)
-    else:
-        st.caption("関連度マップは非表示です（サイドバーで表示できます）。")
-
+    render_upper(profile, thresholds)
     st.divider()
-    render_featured(thresholds)
-    st.divider()
-    render_stream(thresholds)
-
-    # 第3層: Jev の性能を示す数字。状況ではないので下に置く。
-    # ただしデモの主張として重要なので、初期状態は開いておく。
-    st.divider()
-    with st.expander("Jev の性能（処理件数・レイテンシ・トークン・コスト）", expanded=True):
-        render_metrics(profile)
+    render_lower(profile, thresholds)
 
 
 main()
