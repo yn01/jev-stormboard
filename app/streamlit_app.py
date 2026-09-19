@@ -280,9 +280,9 @@ def render_sidebar() -> dict:
         days = available_days()
         replay_day = st.sidebar.selectbox("対象日", days, index=0 if days else None)
         speed_label = st.sidebar.select_slider(
-            "再生速度", options=["1倍", "10倍", "60倍"], value="60倍"
+            "再生速度", options=["1倍", "10倍", "60倍", "100倍"], value="60倍"
         )
-        replay_speed = {"1倍": 1, "10倍": 10, "60倍": 60}[speed_label]
+        replay_speed = {"1倍": 1, "10倍": 10, "60倍": 60, "100倍": 100}[speed_label]
 
     engine.set_mode(
         "replay" if mode_label == "リプレイ" else "live",

@@ -307,3 +307,32 @@ def test_モードを変えると再生位置が消える(tmp_path: Path):
     engine.set_mode("live")
 
     assert engine.status.replay_position == ""
+
+
+# ---------------------------------------------------------------- 再生速度
+
+
+def test_再生速度は100倍まで選べる():
+    import pathlib
+
+    source = pathlib.Path("app/streamlit_app.py").read_text(encoding="utf-8")
+    assert '"100倍"' in source
+    assert '"100倍": 100' in source
+
+
+def test_待ち時間の上限は速度が上がるほど短くなる():
+    """上限が固定だと、間隔が広い区間でどの速度でも同じだけ待つことになり、
+    速度を上げた意味がなくなる。
+    """
+    from app.engine import REPLAY_MAX_WAIT_BASE_SPEED, REPLAY_MAX_WAIT_SEC
+
+    def limit(speed: int) -> float:
+        return REPLAY_MAX_WAIT_SEC * min(1.0, REPLAY_MAX_WAIT_BASE_SPEED / max(1, speed))
+
+    # 基準(60倍)までは同じ。デモが止まって見えないための上限なので緩めない
+    assert limit(1) == pytest.approx(REPLAY_MAX_WAIT_SEC)
+    assert limit(10) == pytest.approx(REPLAY_MAX_WAIT_SEC)
+    assert limit(60) == pytest.approx(REPLAY_MAX_WAIT_SEC)
+    # それより速くすると、上限も比例して縮む
+    assert limit(100) == pytest.approx(1.8)
+    assert limit(100) < limit(60)

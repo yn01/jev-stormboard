@@ -40,6 +40,13 @@ LIVE_POLL_SEC = 5.0  # ライブモードで index.jsonl を見に行く間隔
 RATE_LIMIT_WAIT_SEC = 20.0  # レート制限に当たったときに空ける間隔
 ERROR_WAIT_SEC = 5.0
 
+# リプレイで、電文と電文の間に空ける待ち時間の上限(60倍速のとき)。
+# これが無いと、夜間など電文が何十分も空く区間で再生が止まって見える。
+# 速度を上げたときは上限も比例して縮める。そうしないと、間隔が広い区間で
+# どの速度でも同じだけ待つことになり、速度を上げた意味がなくなる。
+REPLAY_MAX_WAIT_SEC = 3.0
+REPLAY_MAX_WAIT_BASE_SPEED = 60
+
 # ライブモードの起動時に、さかのぼって判定する件数の上限。
 # 索引には数千件あるので、起動と同時に全部投げないようにする。
 LIVE_INITIAL_BACKLOG = 20
@@ -391,9 +398,13 @@ class Engine:
             current = self._updated_dt(record)
             if previous is not None and current is not None:
                 gap = (current - previous).total_seconds() / max(1, speed)
-                # 待ちが長くなりすぎないよう上限をかける(デモが止まって見えないように)
+                # 待ちが長くなりすぎないよう上限をかける(デモが止まって見えないように)。
+                # 上限は速度に応じて縮める(60倍で3秒、100倍で1.8秒)
                 if gap > 0:
-                    self._sleep(min(gap, 3.0))
+                    limit = REPLAY_MAX_WAIT_SEC * min(
+                        1.0, REPLAY_MAX_WAIT_BASE_SPEED / max(1, speed)
+                    )
+                    self._sleep(min(gap, limit))
                     if self._stop.is_set() or self._changed(generation):
                         return
             previous = current
