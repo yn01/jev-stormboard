@@ -20,6 +20,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.engine import INPUT_COST_PER_MTOK, Engine, available_days  # noqa: E402
+from app.geo import build_map_data  # noqa: E402
+from app.mapview import build_figure, caption as map_caption, top_prefectures  # noqa: E402
 from app.store import JudgedMessage, profile_fingerprint  # noqa: E402
 from core.judge import load_profile  # noqa: E402
 from core.questions import QUESTION_SET_SIZES  # noqa: E402
@@ -214,6 +216,13 @@ def render_sidebar() -> dict:
     st.sidebar.caption(
         "↑ カード内で、0.5 付近(どちらとも言えない)の Noul を薄くします。"
         "0 のままなら全部そのまま表示します。"
+    )
+
+    st.sidebar.checkbox(
+        "関連度マップを表示",
+        value=True,
+        key="show_map",
+        help="地図の描画が重い場合は外してください。本番当日の動作の確実性を優先するためのスイッチです。",
     )
 
     st.sidebar.divider()
@@ -509,6 +518,60 @@ def render_profile_notice(profile: dict, engine: Engine) -> None:
     st.warning("\n\n".join(lines))
 
 
+@st.fragment(run_every="6s")
+def render_map(thresholds: dict, profile: dict) -> None:
+    """関連度のヒートマップ。
+
+    地図は1回あたりの転送量が大きい(GeoJSON を含めて約120KB)ので、
+    ほかの部分より更新間隔を長くする。
+    """
+    engine = get_engine()
+    judged_all = engine.store.all(thresholds["question_count"])
+    map_data = build_map_data(judged_all)
+
+    left, right = st.columns([2.4, 1])
+    with left:
+        st.plotly_chart(
+            build_figure(map_data, profile),
+            use_container_width=True,
+            config={"displayModeBar": False, "scrollZoom": False},
+            key=f"relevance-map-{thresholds['question_count']}",
+        )
+    with right:
+        st.markdown(
+            '<div style="font-size:0.8rem;color:#6b7280;margin-bottom:6px;">'
+            "関連度の高い地域</div>",
+            unsafe_allow_html=True,
+        )
+        tops = top_prefectures(map_data)
+        if not tops:
+            st.caption("まだ判定した電文がありません。")
+        rows = []
+        for stat in tops:
+            color = (
+                "#b91c1c" if stat.relevance >= 0.75
+                else "#ea580c" if stat.relevance >= 0.5
+                else "#9ca3af"
+            )
+            rows.append(
+                '<div style="display:flex;align-items:center;gap:8px;margin:5px 0;">'
+                f'<div style="width:62px;font-size:0.85rem;">{stat.name}</div>'
+                f'<div style="flex:1;">{bar(stat.relevance, color)}</div>'
+                f'<div style="width:38px;text-align:right;font-size:0.85rem;'
+                f'font-variant-numeric:tabular-nums;color:{color};">'
+                f"{stat.relevance:.2f}</div>"
+                "</div>"
+            )
+        st.markdown("".join(rows), unsafe_allow_html=True)
+        if tops:
+            st.caption(
+                f"{tops[0].name}が最も高いのは、"
+                f"「{tops[0].top_title[:22]}」の判定によるものです。"
+            )
+
+    st.caption(map_caption(map_data))
+
+
 @st.fragment(run_every="2s")
 def render_featured(thresholds: dict) -> None:
     """注目の判定。関連度が高いものを新しい順にカードで出す。"""
@@ -620,6 +683,15 @@ def main() -> None:
     render_header(profile)
     render_mode_bar()
     render_conclusion(thresholds)
+
+    st.divider()
+    # 第1.5層: 全国に流れる電文の中で、自分に関係するところだけが濃くなる地図。
+    # 重い場合に備えて折りたたみにできるが、主役なので初期状態は開いておく。
+    if st.session_state.get("show_map", True):
+        st.subheader("関連度マップ")
+        render_map(thresholds, profile)
+    else:
+        st.caption("関連度マップは非表示です（サイドバーで表示できます）。")
 
     st.divider()
     render_featured(thresholds)
