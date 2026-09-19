@@ -35,6 +35,11 @@ from core.questions import QUESTION_SET_SIZES  # noqa: E402
 
 JST = timezone(timedelta(hours=9), "JST")
 
+# リプレイの開始時刻の選択肢(30分刻み)
+REPLAY_START_TIMES: list[str] = [
+    f"{hour:02d}:{minute:02d}" for hour in range(24) for minute in (0, 30)
+]
+
 FEATURED_LIMIT = 5  # 「注目の判定」に出すカードの最大数
 STREAM_LIMIT = 60  # 「流れる電文」に出す行数
 
@@ -275,10 +280,23 @@ def render_sidebar() -> dict:
         help="ライブは新しい電文を待ち受け、リプレイは保存済みの電文を再生します。",
     )
 
-    replay_day, replay_speed = "", 1
+    replay_day, replay_speed, replay_start = "", 1, ""
     if mode_label == "リプレイ":
         days = available_days()
         replay_day = st.sidebar.selectbox("対象日", days, index=0 if days else None)
+
+        # その日のどこから再生を始めるか。30分刻み
+        replay_start = st.sidebar.select_slider(
+            "開始時刻",
+            options=REPLAY_START_TIMES,
+            value="00:00",
+            help=(
+                "この時刻より前の電文は飛ばして再生します。"
+                "画面には、その時刻までに届いた電文も含めて表示されます"
+                "（その時刻時点の状況から始まる、という見え方になります）。"
+            ),
+        )
+
         speed_label = st.sidebar.select_slider(
             "再生速度", options=["1倍", "10倍", "60倍", "100倍"], value="60倍"
         )
@@ -289,6 +307,7 @@ def render_sidebar() -> dict:
         replay_day=replay_day,
         replay_speed=replay_speed,
         question_count=question_count,
+        replay_start=replay_start,
     )
 
     st.sidebar.divider()
@@ -352,6 +371,7 @@ def render_mode_bar(profile: dict) -> None:
             # 「09/20 00:01」の時刻部分だけ。日付はバッジの先頭に出ている
             position = status.replay_position_jst
             clock = f"　⏱ {position.split(' ')[-1]}" if position else ""
+            origin = f"　{status.replay_start}〜" if status.replay_start not in ("", "00:00") else ""
             st.markdown(
                 '<div style="display:flex;align-items:center;gap:10px;padding:6px 12px;'
                 'background:rgba(124,58,237,.18);border:1px solid #a78bfa;'
@@ -360,7 +380,7 @@ def render_mode_bar(profile: dict) -> None:
                 'display:inline-block;"></span>'
                 '<span style="font-weight:700;color:#c4b5fd;">リプレイ</span>'
                 f'<span style="color:#c4b5fd;font-size:0.78rem;">'
-                f"{status.replay_day[5:]}　{state}{clock}{progress}</span>"
+                f"{status.replay_day[5:]}{origin}　{state}{clock}{progress}</span>"
                 "</div>",
                 unsafe_allow_html=True,
             )

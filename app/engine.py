@@ -85,6 +85,7 @@ class Status:
     rate_limited_until: float = 0.0  # monotonic 時刻
     error: str = ""
     replay_day: str = ""
+    replay_start: str = ""  # 再生を始める時刻(JST の HH:MM)
     replay_speed: int = 1
     replay_done: int = 0
     replay_total: int = 0
@@ -131,6 +132,7 @@ class Engine:
         # モードの指示(画面から書き換えられる)
         self._mode = "live"
         self._replay_day = ""
+        self._replay_start = ""
         self._replay_speed = 1
         self._mode_generation = 0  # モードが変わったら増やし、古い再生を止める
 
@@ -171,6 +173,7 @@ class Engine:
         replay_day: str = "",
         replay_speed: int = 1,
         question_count: int | None = None,
+        replay_start: str = "",
     ) -> None:
         """画面から呼ぶ。指示が変わったら、進行中の再生を打ち切って切り替える。"""
         count = question_count or self._question_count
@@ -179,6 +182,7 @@ class Engine:
                 mode != self._mode
                 or replay_day != self._replay_day
                 or replay_speed != self._replay_speed
+                or replay_start != self._replay_start
                 or count != self._question_count
             )
             if not changed:
@@ -186,11 +190,13 @@ class Engine:
             count_changed = count != self._question_count
             self._mode = mode
             self._replay_day = replay_day
+            self._replay_start = replay_start
             self._replay_speed = replay_speed
             self._question_count = count
             self._mode_generation += 1
             self.status.mode = mode
             self.status.replay_day = replay_day
+            self.status.replay_start = replay_start
             self.status.replay_speed = replay_speed
             self.status.question_count = count
             self.status.replay_done = 0
@@ -246,6 +252,10 @@ class Engine:
     def _current_mode(self) -> tuple[str, str, int, int]:
         with self._lock:
             return self._mode, self._replay_day, self._replay_speed, self._mode_generation
+
+    def _start_time(self) -> str:
+        with self._lock:
+            return self._replay_start
 
     def _count(self) -> int:
         with self._lock:
@@ -373,12 +383,20 @@ class Engine:
         records = [r for r in load_index() if self._day_of(r) == day]
         records.sort(key=lambda r: r.updated)
 
+        # 開始時刻が指定されていれば、その時刻より前の電文は飛ばす。
+        # 画面は「再生位置まで」を見せるので、飛ばしたぶんも最初から表示される
+        # (その時刻時点の状況から始まる、という見え方になる)
+        start = self._start_time()
+        if start:
+            records = [r for r in records if self._jst_hhmm(r) >= start]
+
         self.status.replay_total = len(records)
         self.status.replay_done = 0
         self.status.replay_position = ""
         self.status.replay_position_jst = ""
         if not records:
-            self.status.message = f"リプレイ: {day} の電文がありません"
+            where = f"{day} の {start} 以降" if start else f"{day}"
+            self.status.message = f"リプレイ: {where} に電文がありません"
             self._sleep(2.0)
             return
 
@@ -417,7 +435,8 @@ class Engine:
             self._judge_one(record)
             self.status.replay_done += 1
 
-        self.status.message = f"リプレイ: {day} の再生が終わりました({len(records)}件)"
+        from_text = f"{start} から " if start else ""
+        self.status.message = f"リプレイ: {day} {from_text}の再生が終わりました({len(records)}件)"
         self.status.replay_position = ""  # 終わったら全件を見せる
         self.status.replay_position_jst = "再生終了"
         self._sleep(3.0)
@@ -485,6 +504,12 @@ class Engine:
             return datetime.fromisoformat(text)
         except ValueError:
             return None
+
+    @classmethod
+    def _jst_hhmm(cls, record: IndexRecord) -> str:
+        """電文の発表時刻(JST)を HH:MM で返す。開始時刻の絞り込みに使う。"""
+        dt = cls._updated_dt(record)
+        return dt.astimezone(JST).strftime("%H:%M") if dt else "00:00"
 
     @classmethod
     def _day_of(cls, record: IndexRecord) -> str:

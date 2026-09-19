@@ -336,3 +336,55 @@ def test_待ち時間の上限は速度が上がるほど短くなる():
     # それより速くすると、上限も比例して縮む
     assert limit(100) == pytest.approx(1.8)
     assert limit(100) < limit(60)
+
+
+# ---------------------------------------------------------------- 再生の開始時刻
+
+
+def test_開始時刻で再生対象を絞れる():
+    from core.message import IndexRecord
+
+    def record(hhmm_utc: str) -> IndexRecord:
+        return IndexRecord(
+            id="x", title="t", updated=f"2026-09-19T{hhmm_utc}:00Z", author="a",
+            feed="extra", url="u", path="data/raw/2026-09-19/foo.xml.gz",
+        )
+
+    # UTC 00:00 は JST 09:00
+    assert Engine._jst_hhmm(record("00:00")) == "09:00"
+    assert Engine._jst_hhmm(record("12:30")) == "21:30"
+    # UTC の前日 15:00 は JST 00:00
+    assert Engine._jst_hhmm(
+        IndexRecord(id="x", title="t", updated="2026-09-18T15:00:00Z", author="a",
+                    feed="extra", url="u", path="data/raw/2026-09-19/foo.xml.gz")
+    ) == "00:00"
+
+    # 文字列のまま比較できる(ゼロ埋めしてあるため)
+    assert "09:00" >= "06:00"
+    assert not ("05:30" >= "06:00")
+
+
+def test_開始時刻を変えると再生し直す(tmp_path: Path):
+    engine = Engine(JudgedStore(tmp_path / "judgements.jsonl"))
+    engine.set_mode("replay", replay_day="2026-09-19", replay_speed=60, replay_start="00:00")
+    _, _, _, before = engine._current_mode()
+
+    engine.set_mode("replay", replay_day="2026-09-19", replay_speed=60, replay_start="12:00")
+    _, _, _, after = engine._current_mode()
+
+    assert after != before  # 進行中の再生が打ち切られる
+    assert engine.status.replay_start == "12:00"
+    assert engine._start_time() == "12:00"
+
+
+def test_開始時刻の選択肢は30分刻みの48個():
+    times = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 30)]
+    assert len(times) == 48
+    assert times[0] == "00:00"
+    assert times[-1] == "23:30"
+
+    import pathlib
+
+    source = pathlib.Path("app/streamlit_app.py").read_text(encoding="utf-8")
+    assert "REPLAY_START_TIMES" in source
+    assert '"開始時刻"' in source
