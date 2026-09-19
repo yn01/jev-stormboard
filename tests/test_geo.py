@@ -188,3 +188,24 @@ def test_図が組み立てられる():
 
     tops = top_prefectures(data)
     assert tops[0].name == "東京都"
+
+
+# ---------------------------------------------------------------- 依存が欠けた場合
+
+
+def test_plotlyが無くても画面を落とさない(monkeypatch):
+    """依存が1つ欠けただけで画面全体が落ちると、本番当日に立ち行かなくなる。
+
+    地図は出せなくても、集計と説明文は使えること。
+    """
+    from app import mapview
+
+    monkeypatch.setattr(mapview, "PLOTLY_AVAILABLE", False)
+
+    data = build_map_data([make(DATA_URL + "a_0_VPWW53_130000.xml", relevance=0.9)])
+
+    # 図は None を返すだけで、例外を投げない
+    assert mapview.build_figure(data, {"lat": 35.68, "lon": 139.69}) is None
+    # 数字で見せる分は使える
+    assert mapview.top_prefectures(data)[0].name == "東京都"
+    assert "警報の強さではありません" in mapview.caption(data)

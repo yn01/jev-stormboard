@@ -12,9 +12,19 @@ Jev が判定した「この電文がプロファイルの人物にとってど�
 
 from __future__ import annotations
 
-import plotly.graph_objects as go
-
 from .geo import GEOJSON_SOURCE, GEOJSON_VIA, MapData, load_geojson
+
+# plotly が無い環境でも、地図以外は動くようにする。
+# 依存が1つ欠けただけで画面全体が落ちると、本番当日に立ち行かなくなるため。
+try:
+    import plotly.graph_objects as go
+
+    PLOTLY_AVAILABLE = True
+    PLOTLY_ERROR = ""
+except ImportError as exc:  # pragma: no cover - 依存が揃っていれば通らない
+    go = None  # type: ignore[assignment]
+    PLOTLY_AVAILABLE = False
+    PLOTLY_ERROR = str(exc)
 
 # 結論バナーと同系統の色。薄いグレー -> 黄 -> 橙 -> 赤
 RELEVANCE_SCALE = [
@@ -31,8 +41,11 @@ UNDERLAY_COLOR = "#e5e7eb"
 EMPTY_COLOR = "#f8fafc"
 
 
-def build_figure(map_data: MapData, profile: dict) -> go.Figure:
-    """ヒートマップを組み立てる。"""
+def build_figure(map_data: MapData, profile: dict):
+    """ヒートマップを組み立てる。plotly が無ければ None を返す。"""
+    if not PLOTLY_AVAILABLE:
+        return None
+
     stats = sorted(map_data.stats.values(), key=lambda s: s.code)
 
     with_message = [s for s in stats if s.count]

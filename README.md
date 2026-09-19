@@ -211,11 +211,21 @@ Jev の答えは型によって形が違います。
 ## 画面(Streamlit)
 
 ```bash
-source .venv/bin/activate
+cd ~/Dev/jev-stormboard      # ← このプロジェクトのディレクトリで
+source .venv/bin/activate    # ← このプロジェクトの .venv を有効にする
 streamlit run app/streamlit_app.py
 ```
 
-ブラウザで http://localhost:8501 が開きます。ロガーとは**別のプロセス**で動き、
+ブラウザで http://localhost:8501 が開きます。
+
+> **別プロジェクトの仮想環境で起動しないこと。**
+> `.venv` を有効にし忘れたり、ほかのプロジェクト（jev-intent など）の
+> `.venv/bin/streamlit` で起動すると、`plotly` や `httpx` が無くて
+> `ModuleNotFoundError` になります。`which streamlit` で
+> `jev-stormboard/.venv/bin/streamlit` が出ることを確認してください。
+>
+> なお `plotly` が無い場合でも**画面全体は落ちません**。関連度マップだけが
+> 表示されず、案内が出ます。ロガーとは**別のプロセス**で動き、
 `data/index.jsonl` は読み取りしかしません(ロガーを止める必要はありません)。
 
 画面は上から3層に並びます。

@@ -21,7 +21,12 @@ if str(ROOT) not in sys.path:
 
 from app.engine import INPUT_COST_PER_MTOK, Engine, available_days  # noqa: E402
 from app.geo import build_map_data  # noqa: E402
-from app.mapview import build_figure, caption as map_caption, top_prefectures  # noqa: E402
+from app.mapview import (  # noqa: E402
+    PLOTLY_AVAILABLE,
+    build_figure,
+    caption as map_caption,
+    top_prefectures,
+)
 from app.store import JudgedMessage, profile_fingerprint  # noqa: E402
 from core.judge import load_profile  # noqa: E402
 from core.questions import QUESTION_SET_SIZES  # noqa: E402
@@ -528,6 +533,20 @@ def render_map(thresholds: dict, profile: dict) -> None:
     engine = get_engine()
     judged_all = engine.store.all(thresholds["question_count"])
     map_data = build_map_data(judged_all)
+
+    if not PLOTLY_AVAILABLE:
+        st.warning(
+            "地図の描画に必要な `plotly` が入っていないため、関連度マップは表示できません。"
+            "画面のほかの部分は動いています。\n\n"
+            "プロジェクトの仮想環境で起動しているか確認してください:\n"
+            "```\ncd ~/Dev/jev-stormboard\nsource .venv/bin/activate\n"
+            "pip install -r requirements.txt\nstreamlit run app/streamlit_app.py\n```"
+        )
+        # 地図が出せなくても、関連度の高い地域は数字で見せる
+        tops = top_prefectures(map_data)
+        if tops:
+            st.caption("関連度の高い地域: " + "　".join(f"{s.name} {s.relevance:.2f}" for s in tops))
+        return
 
     left, right = st.columns([2.4, 1])
     with left:
