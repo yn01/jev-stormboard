@@ -6,6 +6,8 @@ Plotly の図そのものは描かず、組み立てが通ることだけ見る�
 
 from __future__ import annotations
 
+import pathlib
+
 import pytest
 
 from app.geo import (
@@ -167,8 +169,8 @@ def test_読めないコードは不明として数える():
 # ---------------------------------------------------------------- 図の組み立て
 
 
-def test_図が組み立てられる():
-    from app.mapview import build_figure, caption, top_prefectures
+def test_SVGが組み立てられる():
+    from app.mapview import build_svg, caption, legend_html, top_prefectures
 
     judged = [
         make(DATA_URL + "a_0_VPWW53_130000.xml", relevance=0.9, title="東京都気象警報"),
@@ -177,9 +179,16 @@ def test_図が組み立てられる():
     data = build_map_data(judged)
     profile = {"name": "テスト", "pref": "東京都", "city": "", "lat": 35.68, "lon": 139.69}
 
-    figure = build_figure(data, profile)
-    # 電文のない県の下敷き + 色つき + 居住地の目印
-    assert len(figure.data) == 3
+    svg = build_svg(data, profile)
+    assert "<svg" in svg and "</svg>" in svg
+    # 関東8都県のパスが入っている
+    assert svg.count('class="pref"') == 8
+    # 居住地の目印
+    assert "home-pulse" in svg
+    # 関連度が高い東京都はラベルが出る
+    assert "0.90" in svg
+
+    assert "警報の強さではありません" in legend_html()
 
     text = caption(data)
     assert "警報の強さではありません" in text
@@ -190,22 +199,52 @@ def test_図が組み立てられる():
     assert tops[0].name == "東京都"
 
 
-# ---------------------------------------------------------------- 依存が欠けた場合
+def test_関東圏だけを描く():
+    from app.mapview import KANTO_CODES, kanto_codes_in_view
+
+    codes = kanto_codes_in_view()
+    assert len(codes) == 8
+    assert set(codes) == set(KANTO_CODES)
+    # 北海道・沖縄は描かない(見たい関東が小さくなるため)
+    assert "01" not in codes and "47" not in codes
 
 
-def test_plotlyが無くても画面を落とさない(monkeypatch):
-    """依存が1つ欠けただけで画面全体が落ちると、本番当日に立ち行かなくなる。
+def test_東京都の島嶼部は関東の地図から外す():
+    """伊豆諸島・小笠原まで描くと、関東が縦に伸びて小さくなる。"""
+    from app.mapview import MIN_LAT, _kanto_shapes
 
-    地図は出せなくても、集計と説明文は使えること。
+    tokyo = next(path for code, _, path in _kanto_shapes() if code == "13")
+    ys = []
+    for token in tokyo.replace("M", " ").replace("L", " ").replace("Z", " ").split():
+        if "," in token:
+            ys.append(float(token.split(",")[1]))
+    # SVG の高さに収まっている(南へはみ出していない)
+    assert max(ys) <= 460
+    assert MIN_LAT > 34.0
+
+
+def test_関連度が色になる():
+    from app.mapview import relevance_color
+
+    low = relevance_color(0.0)
+    high = relevance_color(1.0)
+    assert low != high
+    assert low.startswith("#") and len(low) == 7
+    # 範囲外でも落ちない
+    assert relevance_color(-1.0) == low
+    assert relevance_color(2.0) == high
+
+
+# ---------------------------------------------------------------- 依存
+
+
+def test_地図の描画に外部ライブラリが要らない():
+    """SVG を自前で組み立てるので、plotly などの描画ライブラリに依存しない。
+
+    依存が減るぶん、環境の取り違えで画面が落ちる余地も減る。
     """
-    from app import mapview
+    import app.mapview as mapview
 
-    monkeypatch.setattr(mapview, "PLOTLY_AVAILABLE", False)
-
-    data = build_map_data([make(DATA_URL + "a_0_VPWW53_130000.xml", relevance=0.9)])
-
-    # 図は None を返すだけで、例外を投げない
-    assert mapview.build_figure(data, {"lat": 35.68, "lon": 139.69}) is None
-    # 数字で見せる分は使える
-    assert mapview.top_prefectures(data)[0].name == "東京都"
-    assert "警報の強さではありません" in mapview.caption(data)
+    source = pathlib.Path(mapview.__file__).read_text(encoding="utf-8")
+    assert "import plotly" not in source
+    assert "pydeck" not in source

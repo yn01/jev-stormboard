@@ -1,0 +1,16 @@
+# 画面のテーマ。暗い背景に、関連度の色(シアン→アンバー→レッド)が映えるようにする。
+# secrets.toml と違い、この設定ファイルには秘密情報を書かないのでコミットしてよい。
+
+[theme]
+base = "dark"
+primaryColor = "#38bdf8"           # スライダーやラジオなどの操作色(シアン)
+backgroundColor = "#0b1220"        # 本文の背景(濃紺)
+secondaryBackgroundColor = "#121c2e"  # サイドバーとカードの背景
+textColor = "#e2e8f0"
+font = "sans serif"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false

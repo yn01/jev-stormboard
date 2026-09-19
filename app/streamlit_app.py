@@ -22,9 +22,10 @@ if str(ROOT) not in sys.path:
 from app.engine import INPUT_COST_PER_MTOK, Engine, available_days  # noqa: E402
 from app.geo import build_map_data  # noqa: E402
 from app.mapview import (  # noqa: E402
-    PLOTLY_AVAILABLE,
-    build_figure,
+    MAP_STYLE,
+    build_svg,
     caption as map_caption,
+    legend_html,
     top_prefectures,
 )
 from app.store import JudgedMessage, profile_fingerprint  # noqa: E402
@@ -37,23 +38,31 @@ FEATURED_LIMIT = 5  # 「注目の判定」に出すカードの最大数
 STREAM_LIMIT = 60  # 「流れる電文」に出す行数
 
 # Choice action の値ごとの色。深刻なほど赤に寄せる
+# 暗い背景の上で読める色。行動が重くなるほど赤に寄せる
 ACTION_COLORS = {
-    "通常どおり": "#15803d",
-    "予定変更を検討": "#a16207",
-    "今日中に備える": "#c2410c",
-    "外出を控える": "#dc2626",
-    "早めの避難を検討": "#991b1b",
+    "通常どおり": "#4ade80",
+    "予定変更を検討": "#facc15",
+    "今日中に備える": "#fb923c",
+    "外出を控える": "#f87171",
+    "早めの避難を検討": "#ef4444",
 }
 
-# 結論バナーの背景。行動が重くなるほど赤に寄せる
+# 結論バナー: (背景, 枠線, 文字)
 ACTION_BANNER = {
-    "通常どおり": ("#dcfce7", "#15803d", "#166534"),
-    "予定変更を検討": ("#fef9c3", "#ca8a04", "#854d0e"),
-    "今日中に備える": ("#ffedd5", "#ea580c", "#9a3412"),
-    "外出を控える": ("#fee2e2", "#dc2626", "#991b1b"),
-    "早めの避難を検討": ("#7f1d1d", "#450a0a", "#ffffff"),
+    "通常どおり": ("rgba(34,197,94,.14)", "#22c55e", "#86efac"),
+    "予定変更を検討": ("rgba(234,179,8,.14)", "#eab308", "#fde047"),
+    "今日中に備える": ("rgba(249,115,22,.16)", "#f97316", "#fdba74"),
+    "外出を控える": ("rgba(239,68,68,.16)", "#ef4444", "#fca5a5"),
+    "早めの避難を検討": ("rgba(239,68,68,.30)", "#f87171", "#fecaca"),
 }
-BANNER_NONE = ("#f3f4f6", "#d1d5db", "#6b7280")
+BANNER_NONE = ("rgba(148,163,184,.10)", "#334155", "#94a3b8")
+
+# 画面共通の色
+INK = "#e2e8f0"      # 本文
+MUTED = "#94a3b8"    # 補足
+LINE = "#1e293b"     # 罫線
+PANEL = "#121c2e"    # カード背景
+TRACK = "#1e293b"    # バーの下地
 
 st.set_page_config(page_title="jev-stormboard", page_icon="🌀", layout="wide")
 
@@ -116,13 +125,13 @@ def action_badge(action: str) -> str:
     )
 
 
-def bar(value: float, color: str = "#2563eb", width_pct: float = 100.0) -> str:
+def bar(value: float, color: str = "#38bdf8", width_pct: float = 100.0) -> str:
     """0〜1 の値を横棒にする。"""
     pct = max(0.0, min(1.0, value)) * 100
     return (
-        f'<div style="background:#e5e7eb;border-radius:4px;height:8px;width:{width_pct}%;">'
-        f'<div style="background:{color};width:{pct:.1f}%;height:8px;border-radius:4px;"></div>'
-        "</div>"
+        f'<div style="background:{TRACK};border-radius:4px;height:8px;width:{width_pct}%;">'
+        f'<div style="background:{color};width:{pct:.1f}%;height:8px;border-radius:4px;'
+        f'transition:width .6s ease;"></div></div>'
     )
 
 
@@ -130,7 +139,7 @@ def answer_row(answer) -> str:
     """質問1問ぶんの表示。型ごとに見せ方を変える。"""
     if answer.kind == "noul":
         value = float(answer.value)
-        color = "#dc2626" if value >= 0.7 else ("#2563eb" if value >= 0.4 else "#9ca3af")
+        color = "#f87171" if value >= 0.7 else ("#38bdf8" if value >= 0.4 else MUTED)
         return (
             f'<div style="display:flex;align-items:center;gap:8px;margin:3px 0;">'
             f'<div style="width:120px;font-size:0.85rem;">{answer.label}</div>'
@@ -146,7 +155,7 @@ def answer_row(answer) -> str:
         # 範囲が分からないと、数字もバーの長さも意味を持たないため。
         ratio = answer.scale_ratio()
         top = answer.scale_max
-        color = "#dc2626" if ratio >= 0.7 else ("#2563eb" if ratio >= 0.4 else "#9ca3af")
+        color = "#f87171" if ratio >= 0.7 else ("#38bdf8" if ratio >= 0.4 else MUTED)
         shown = f"{value:.2f} / {top}" if top is not None else f"{value:.2f}"
         return (
             f'<div style="display:flex;align-items:center;gap:8px;margin:3px 0;">'
@@ -175,7 +184,7 @@ def render_card(judged: JudgedMessage, noul_threshold: float) -> None:
         with left:
             st.markdown(
                 f"**{judged.title or judged.kind}**　"
-                f'<span style="color:#6b7280;font-size:0.85rem;">'
+                f'<span style="color:{MUTED};font-size:0.85rem;">'
                 f"{judged.author}　{jst_time(judged.updated)} JST</span>",
                 unsafe_allow_html=True,
             )
@@ -184,7 +193,7 @@ def render_card(judged: JudgedMessage, noul_threshold: float) -> None:
 
         if judged.headline:
             st.markdown(
-                f'<div style="color:#374151;font-size:0.88rem;margin:4px 0 10px;">'
+                f'<div style="color:#cbd5e1;font-size:0.88rem;margin:4px 0 10px;">'
                 f"{judged.headline}</div>",
                 unsafe_allow_html=True,
             )
@@ -302,15 +311,16 @@ def render_header(profile: dict) -> None:
     source = profile.get("_source", "profile.yaml")
     st.markdown(
         f"### 🌀 jev-stormboard　"
-        f'<span style="font-size:1rem;color:#6b7280;">'
+        f'<span style="font-size:1rem;color:{MUTED};">'
         f"{profile.get('name', '')}（{where}）向けの判定"
         f"</span>　"
-        f'<span style="font-size:0.75rem;color:#9ca3af;">読み込み元: {source}</span>',
+        f'<span style="font-size:0.75rem;color:{MUTED};opacity:.75;">'
+        f"読み込み元: {source}</span>",
         unsafe_allow_html=True,
     )
 
 
-@st.fragment(run_every="2s")
+@st.fragment(run_every="0.2s")
 def render_mode_bar() -> None:
     """モードの常時表示と操作ボタン。結論バナーのすぐ上に置く。
 
@@ -333,12 +343,12 @@ def render_mode_bar() -> None:
             clock = f"　⏱ {status.replay_position_jst}" if status.replay_position_jst else ""
             st.markdown(
                 '<div style="display:flex;align-items:center;gap:10px;padding:6px 12px;'
-                'background:#ede9fe;border:1px solid #7c3aed;border-radius:20px;'
+                'background:rgba(124,58,237,.18);border:1px solid #a78bfa;border-radius:20px;'
                 'display:inline-flex;">'
-                '<span style="width:10px;height:10px;border-radius:50%;background:#7c3aed;'
+                '<span style="width:10px;height:10px;border-radius:50%;background:#a78bfa;'
                 'display:inline-block;"></span>'
-                '<span style="font-weight:700;color:#5b21b6;">リプレイ</span>'
-                f'<span style="color:#5b21b6;font-size:0.85rem;">'
+                '<span style="font-weight:700;color:#c4b5fd;">リプレイ</span>'
+                f'<span style="color:#c4b5fd;font-size:0.85rem;">'
                 f"{status.replay_day}　{state}{clock}{progress}</span>"
                 "</div>",
                 unsafe_allow_html=True,
@@ -354,11 +364,11 @@ def render_mode_bar() -> None:
             st.markdown(
                 "<style>@keyframes blink{0%,100%{opacity:1}50%{opacity:0.25}}</style>"
                 '<div style="display:inline-flex;align-items:center;gap:10px;padding:6px 12px;'
-                'background:#dcfce7;border:1px solid #16a34a;border-radius:20px;">'
-                '<span style="width:10px;height:10px;border-radius:50%;background:#16a34a;'
+                'background:rgba(34,197,94,.16);border:1px solid #4ade80;border-radius:20px;">'
+                '<span style="width:10px;height:10px;border-radius:50%;background:#4ade80;'
                 'display:inline-block;animation:blink 1.4s infinite;"></span>'
-                '<span style="font-weight:700;color:#15803d;">ライブ</span>'
-                f'<span style="color:#15803d;font-size:0.85rem;">{elapsed}</span>'
+                '<span style="font-weight:700;color:#86efac;">ライブ</span>'
+                f'<span style="color:#86efac;font-size:0.85rem;">{elapsed}</span>'
                 "</div>",
                 unsafe_allow_html=True,
             )
@@ -390,9 +400,10 @@ def _supplement(judged: JudgedMessage, key: str) -> str:
     answer = judged.answer(key) if judged else None
     if answer is None:
         return (
-            '<div style="flex:1;padding:8px 12px;background:#f9fafb;border-radius:6px;">'
-            '<div style="font-size:0.75rem;color:#6b7280;">--</div>'
-            '<div style="font-size:1.1rem;color:#9ca3af;">--</div></div>'
+            f'<div style="flex:1;padding:8px 12px;background:{PANEL};border-radius:8px;'
+            f'border:1px solid {LINE};">'
+            f'<div style="font-size:0.75rem;color:{MUTED};">--</div>'
+            f'<div style="font-size:1.1rem;color:{MUTED};">--</div></div>'
         )
 
     ratio = answer.scale_ratio()
@@ -400,10 +411,11 @@ def _supplement(judged: JudgedMessage, key: str) -> str:
         shown = f"{float(answer.value):.2f} / {answer.scale_max}"
     else:
         shown = f"{float(answer.value):.2f}"
-    color = "#dc2626" if ratio >= 0.7 else ("#2563eb" if ratio >= 0.4 else "#6b7280")
+    color = "#f87171" if ratio >= 0.7 else ("#38bdf8" if ratio >= 0.4 else MUTED)
     return (
-        '<div style="flex:1;padding:8px 12px;background:#f9fafb;border-radius:6px;">'
-        f'<div style="font-size:0.75rem;color:#6b7280;">{answer.label}</div>'
+        f'<div style="flex:1;padding:8px 12px;background:{PANEL};border-radius:8px;'
+        f'border:1px solid {LINE};">'
+        f'<div style="font-size:0.75rem;color:{MUTED};">{answer.label}</div>'
         f'<div style="font-size:1.25rem;font-weight:600;color:{color};'
         f'font-variant-numeric:tabular-nums;">{shown}</div>'
         f'<div style="margin-top:4px;">{bar(ratio, color)}</div>'
@@ -411,7 +423,7 @@ def _supplement(judged: JudgedMessage, key: str) -> str:
     )
 
 
-@st.fragment(run_every="2s")
+@st.fragment(run_every="0.2s")
 def render_conclusion(thresholds: dict) -> None:
     """第1層: いま取るべき行動を1つだけ、大きく出す。
 
@@ -457,7 +469,7 @@ def render_conclusion(thresholds: dict) -> None:
     )
 
 
-@st.fragment(run_every="2s")
+@st.fragment(run_every="0.2s")
 def render_metrics(profile: dict) -> None:
     """指標の帯。2秒ごとに描画だけを更新する。"""
     engine = get_engine()
@@ -534,7 +546,7 @@ def render_profile_notice(profile: dict, engine: Engine) -> None:
     st.warning("\n\n".join(lines))
 
 
-@st.fragment(run_every="6s")
+@st.fragment(run_every="0.2s")
 def render_map(thresholds: dict, profile: dict) -> None:
     """関連度のヒートマップ。
 
@@ -543,31 +555,13 @@ def render_map(thresholds: dict, profile: dict) -> None:
     """
     map_data = build_map_data(visible_judgements(thresholds))
 
-    if not PLOTLY_AVAILABLE:
-        st.warning(
-            "地図の描画に必要な `plotly` が入っていないため、関連度マップは表示できません。"
-            "画面のほかの部分は動いています。\n\n"
-            "プロジェクトの仮想環境で起動しているか確認してください:\n"
-            "```\ncd ~/Dev/jev-stormboard\nsource .venv/bin/activate\n"
-            "pip install -r requirements.txt\nstreamlit run app/streamlit_app.py\n```"
-        )
-        # 地図が出せなくても、関連度の高い地域は数字で見せる
-        tops = top_prefectures(map_data)
-        if tops:
-            st.caption("関連度の高い地域: " + "　".join(f"{s.name} {s.relevance:.2f}" for s in tops))
-        return
-
     left, right = st.columns([2.4, 1])
     with left:
-        st.plotly_chart(
-            build_figure(map_data, profile),
-            use_container_width=True,
-            config={"displayModeBar": False, "scrollZoom": False},
-            key=f"relevance-map-{thresholds['question_count']}",
-        )
+        st.markdown(MAP_STYLE + build_svg(map_data, profile) + legend_html(),
+                    unsafe_allow_html=True)
     with right:
         st.markdown(
-            '<div style="font-size:0.8rem;color:#6b7280;margin-bottom:6px;">'
+            f'<div style="font-size:0.8rem;color:{MUTED};margin-bottom:6px;">'
             "関連度の高い地域</div>",
             unsafe_allow_html=True,
         )
@@ -577,9 +571,9 @@ def render_map(thresholds: dict, profile: dict) -> None:
         rows = []
         for stat in tops:
             color = (
-                "#b91c1c" if stat.relevance >= 0.75
-                else "#ea580c" if stat.relevance >= 0.5
-                else "#9ca3af"
+                "#f87171" if stat.relevance >= 0.75
+                else "#fb923c" if stat.relevance >= 0.5
+                else MUTED
             )
             rows.append(
                 '<div style="display:flex;align-items:center;gap:8px;margin:5px 0;">'
@@ -600,7 +594,7 @@ def render_map(thresholds: dict, profile: dict) -> None:
     st.caption(map_caption(map_data))
 
 
-@st.fragment(run_every="2s")
+@st.fragment(run_every="0.2s")
 def render_featured(thresholds: dict) -> None:
     """注目の判定。関連度が高いものを新しい順にカードで出す。"""
     # いま選んでいる質問数で判定したものだけを見せる(質問数が違えば別の結果)
@@ -630,7 +624,7 @@ def render_featured(thresholds: dict) -> None:
         render_card(judged, thresholds["noul"])
 
 
-@st.fragment(run_every="2s")
+@st.fragment(run_every="0.2s")
 def render_stream(thresholds: dict) -> None:
     """流れる電文。関連度が低いものも消さず、薄く表示する。"""
     judged_all = visible_judgements(thresholds)[:STREAM_LIMIT]
@@ -648,8 +642,8 @@ def render_stream(thresholds: dict) -> None:
     threshold = thresholds["relevance"]
     rows: list[str] = []
     rows.append(
-        '<div style="display:flex;gap:10px;font-size:0.75rem;color:#6b7280;'
-        'border-bottom:1px solid #e5e7eb;padding:4px 0;">'
+        f'<div style="display:flex;gap:10px;font-size:0.75rem;color:{MUTED};'
+        f'border-bottom:1px solid {LINE};padding:4px 0;">'
         '<div style="width:90px;">時刻</div>'
         '<div style="flex:2;">種類</div>'
         '<div style="flex:1.4;">発表官署</div>'
@@ -660,23 +654,23 @@ def render_stream(thresholds: dict) -> None:
     )
     for judged in judged_all:
         low = judged.relevance < threshold
-        opacity = "0.32" if low else "1"
+        opacity = "0.30" if low else "1"
         weight = "400" if low else "500"
         color = ACTION_COLORS.get(judged.action, "#6b7280")
         rows.append(
             f'<div style="display:flex;gap:10px;align-items:center;font-size:0.82rem;'
-            f'padding:3px 0;border-bottom:1px solid #f3f4f6;opacity:{opacity};'
+            f'padding:3px 0;border-bottom:1px solid {LINE};opacity:{opacity};'
             f'font-weight:{weight};">'
-            f'<div style="width:90px;color:#6b7280;">{jst_time(judged.updated)}</div>'
+            f'<div style="width:90px;color:{MUTED};">{jst_time(judged.updated)}</div>'
             f'<div style="flex:2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'
             f"{judged.kind}</div>"
-            f'<div style="flex:1.4;color:#6b7280;overflow:hidden;text-overflow:ellipsis;'
+            f'<div style="flex:1.4;color:{MUTED};overflow:hidden;text-overflow:ellipsis;'
             f'white-space:nowrap;">{judged.author}</div>'
             f'<div style="width:110px;display:flex;align-items:center;gap:6px;">'
-            f"{bar(judged.relevance, '#2563eb', 60)}"
+            f"{bar(judged.relevance, '#38bdf8', 60)}"
             f'<span style="font-size:0.78rem;">{judged.relevance:.2f}</span></div>'
             f'<div style="width:120px;color:{color};">{judged.action}</div>'
-            f'<div style="width:70px;text-align:right;color:#6b7280;">'
+            f'<div style="width:70px;text-align:right;color:{MUTED};">'
             f"{judged.latency_ms:.0f}ms</div>"
             "</div>"
         )
@@ -696,11 +690,11 @@ def main() -> None:
         st.markdown(
             "<style>"
             '[data-testid="stAppViewContainer"]{background:'
-            "linear-gradient(#faf5ff,#ffffff 160px);}"
+            "linear-gradient(rgba(124,58,237,.10),rgba(11,18,32,0) 220px);}"
             '[data-testid="stAppViewContainer"]::before{content:"";position:fixed;'
-            "top:0;left:0;right:0;height:5px;background:#7c3aed;z-index:999;}"
+            "top:0;left:0;right:0;height:3px;background:#a78bfa;z-index:999;}"
             '[data-testid="stAppViewContainer"]::after{content:"";position:fixed;'
-            "bottom:0;left:0;right:0;height:5px;background:#7c3aed;z-index:999;}"
+            "bottom:0;left:0;right:0;height:3px;background:#a78bfa;z-index:999;}"
             "</style>",
             unsafe_allow_html=True,
         )

@@ -263,6 +263,9 @@ class JudgedStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._by_key: dict[str, JudgedMessage] = {}
+        # 並べ替えた結果のキャッシュ。画面が 0.2 秒ごとに読むので、
+        # 毎回ソートし直すと無駄が大きい。add のたびに捨てる。
+        self._sorted_cache: dict[int | None, list[JudgedMessage]] = {}
         self._load()
 
     def _load(self) -> None:
@@ -303,12 +306,22 @@ class JudgedStore:
         """新しい順(電文の発表時刻)に並べて返す。
 
         question_count を渡すと、その質問数で判定したものだけに絞る。
+        並べ替えた結果はキャッシュし、新しい判定が入るまで使い回す。
+        返すリストは呼び出し側で書き換えないこと。
         """
         with self._lock:
+            cached = self._sorted_cache.get(question_count)
+            if cached is not None:
+                return cached
             items = list(self._by_key.values())
+
         if question_count is not None:
             items = [j for j in items if j.question_count == question_count]
-        return sorted(items, key=lambda j: j.updated, reverse=True)
+        items.sort(key=lambda j: j.updated, reverse=True)
+
+        with self._lock:
+            self._sorted_cache[question_count] = items
+        return items
 
     def count(self, question_count: int | None = None) -> int:
         if question_count is None:
@@ -339,6 +352,7 @@ class JudgedStore:
     def add(self, judged: JudgedMessage) -> None:
         with self._lock:
             self._by_key[judged.cache_key] = judged
+            self._sorted_cache.clear()  # 並び順が変わるので捨てる
         self._append(judged)
 
     def _append(self, judged: JudgedMessage) -> None:
