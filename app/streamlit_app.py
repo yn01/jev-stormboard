@@ -587,6 +587,71 @@ def render_profile_notice(profile: dict, engine: Engine) -> None:
     st.warning("\n\n".join(lines))
 
 
+def render_ticker(thresholds: dict) -> None:
+    """判定した電文を1行で流す速報欄。
+
+    結論バナーと地図の間に置く。見出しは付けず、いちばん新しい判定を
+    1行だけ出す。更新のたびに中身が入れ替わるので、電文が次々に
+    判定されていく様子がそのまま伝わる。
+    """
+    judged_all = visible_judgements(thresholds)
+    if not judged_all:
+        st.markdown(
+            '<div class="jev-ticker empty">判定を待っています…</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    judged = judged_all[0]
+    relevant = judged.relevance >= thresholds["relevance"]
+    action_color = ACTION_COLORS.get(judged.action, MUTED)
+    # 関連度の色は地図と揃える(青紫系)
+    relevance_color = (
+        "#d946ef" if judged.relevance >= 0.75
+        else "#7c3aed" if judged.relevance >= 0.5
+        else "#64748b"
+    )
+
+    st.markdown(
+        f'<div class="jev-ticker{"" if relevant else " dim"}">'
+        '<span class="dot"></span>'
+        f'<span class="t">{jst_time(judged.updated, "%H:%M")}</span>'
+        f'<span class="kind">{judged.kind}</span>'
+        f'<span class="who">{judged.author}</span>'
+        f'<span class="rel" style="color:{relevance_color};">'
+        f"関連度 {judged.relevance:.2f}</span>"
+        f'<span class="act" style="color:{action_color};">{judged.action}</span>'
+        f'<span class="ms">{judged.latency_ms:.0f}ms</span>'
+        f'<span class="q">{judged.question_count}問</span>'
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+TICKER_STYLE = """
+<style>
+@keyframes jev-tick{from{opacity:0;transform:translateX(-10px);}
+  to{opacity:1;transform:translateX(0);}}
+.jev-ticker{display:flex;align-items:center;gap:12px;white-space:nowrap;overflow:hidden;
+  padding:7px 14px;margin:0 0 12px;border-radius:8px;
+  background:linear-gradient(90deg,rgba(56,189,248,.10),rgba(18,28,46,.55) 40%);
+  border:1px solid #1e293b;border-left:3px solid #38bdf8;
+  font-size:.82rem;animation:jev-tick .35s ease-out;}
+.jev-ticker.dim{border-left-color:#334155;opacity:.55;}
+.jev-ticker.empty{color:#64748b;border-left-color:#334155;}
+.jev-ticker .dot{width:7px;height:7px;border-radius:50%;background:#38bdf8;flex:none;
+  animation:blink 1.4s infinite;}
+.jev-ticker.dim .dot{background:#475569;}
+.jev-ticker .t{color:#94a3b8;font-variant-numeric:tabular-nums;flex:none;}
+.jev-ticker .kind{font-weight:600;overflow:hidden;text-overflow:ellipsis;}
+.jev-ticker .who{color:#94a3b8;flex:none;}
+.jev-ticker .rel{font-variant-numeric:tabular-nums;flex:none;margin-left:auto;}
+.jev-ticker .act{flex:none;}
+.jev-ticker .ms,.jev-ticker .q{color:#64748b;font-variant-numeric:tabular-nums;flex:none;}
+</style>
+"""
+
+
 def render_map(thresholds: dict, profile: dict) -> None:
     """関連度のヒートマップ。
 
@@ -751,6 +816,9 @@ def render_upper(profile: dict, thresholds: dict) -> None:
     render_mode_bar(profile)
     render_conclusion(thresholds)
 
+    # 判定した電文を1行で流す。Jev が次々に判定している様子をそのまま見せる
+    render_ticker(thresholds)
+
     # 大量に流れる電文の中で、自分に関係するところだけが濃くなる地図。
     # スクロールなしで見えるよう、余計な区切りを入れずにすぐ下に置く。
     if st.session_state.get("show_map", True):
@@ -817,6 +885,7 @@ def main() -> None:
             unsafe_allow_html=True,
         )
 
+    st.markdown(TICKER_STYLE, unsafe_allow_html=True)
     render_upper(profile, thresholds)
     st.divider()
     render_lower(profile, thresholds)
