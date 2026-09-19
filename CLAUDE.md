@@ -9,10 +9,17 @@
     種類で絞る場合は `logger/config.py` の `REGULAR_TITLE_INCLUDES` / `TITLE_EXCLUDES`。
 - 次の段階: Streamlit アプリ本体と Jev の呼び出し、リプレイ機能
 
+## 要件リスト
+**`requirements.md` が要件の起点。** 作業の前に読み、要件の追加や実装完了があれば都度更新する。
+(Python の依存関係ファイル `requirements.txt` とは別物なので混同しない)
+
 ## ディレクトリ構成
 | パス | 役割 |
 | --- | --- |
+| `requirements.md` | 要件リスト(開発の起点) |
 | `logger/` | ロガー本体。`python -m logger` で起動 |
+| `core/` | 判定コア。`python -m core.judge --latest` |
+| `profile.yaml` | 判定対象の人物プロファイル(1件) |
 | `app/` | Streamlit アプリ(次段階。いまは空) |
 | `data/raw/` | 保存した電文 `YYYY-MM-DD/<name>.xml.gz`。コミットしない |
 | `data/replay/` | リプレイ用の加工済みデータ。コミットしない |
