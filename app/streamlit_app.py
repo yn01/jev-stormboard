@@ -107,12 +107,42 @@ st.set_page_config(page_title=TAB_TITLE, page_icon="🌀", layout="wide")
 # ---------------------------------------------------------------- 共有リソース
 
 
-@st.cache_resource
-def get_engine() -> Engine:
-    """エンジンはセッションをまたいで1つだけ動かす。"""
+# いま動かしているエンジン。コードを直したときに、古いものを止めるために持つ
+_RUNNING: list[Engine] = []
+
+
+def _code_stamp() -> float:
+    """エンジン側のコードが最後に変わった時刻。
+
+    `st.cache_resource` はプロセスが生きているあいだオブジェクトを持ち続けるので、
+    コードを直しても**古いクラスのインスタンスが残る**。画面側だけが新しくなって
+    `AttributeError` になることがあるため、コードの更新時刻を鍵にして作り直す。
+    """
+    files = ("app/engine.py", "app/store.py", "core/judge.py", "core/questions.py")
+    stamps = []
+    for name in files:
+        path = ROOT / name
+        if path.exists():
+            stamps.append(path.stat().st_mtime)
+    return max(stamps) if stamps else 0.0
+
+
+@st.cache_resource(max_entries=1)
+def _make_engine(code_stamp: float) -> Engine:
+    # コードが変わっていたら、前のエンジンを止めてから新しく作る
+    for old in _RUNNING:
+        old.stop()
+    _RUNNING.clear()
+
     engine = Engine()
     engine.start()
+    _RUNNING.append(engine)
     return engine
+
+
+def get_engine() -> Engine:
+    """エンジンはセッションをまたいで1つだけ動かす。"""
+    return _make_engine(_code_stamp())
 
 
 def get_profile() -> dict:

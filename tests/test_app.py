@@ -534,3 +534,30 @@ def test_速報欄は複数行を積み上げる():
     from app.streamlit_app import TICKER_ROWS
 
     assert TICKER_ROWS >= 5
+
+
+# ---------------------------------------------------------------- コードの更新
+
+
+def test_コードを直すとエンジンを作り直す鍵が変わる():
+    """`st.cache_resource` はプロセスが生きているあいだオブジェクトを持ち続ける。
+
+    コードを直しても古いクラスのインスタンスが残り、画面側だけ新しくなって
+    AttributeError になることがあった。コードの更新時刻を鍵にして作り直す。
+    """
+    import pathlib
+    import time
+
+    from app.streamlit_app import _code_stamp
+
+    before = _code_stamp()
+    assert before > 0
+
+    target = pathlib.Path("app/engine.py")
+    original = target.read_text(encoding="utf-8")
+    try:
+        time.sleep(0.01)
+        target.write_text(original + "\n", encoding="utf-8")
+        assert _code_stamp() > before
+    finally:
+        target.write_text(original, encoding="utf-8")
