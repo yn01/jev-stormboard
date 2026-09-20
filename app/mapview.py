@@ -293,7 +293,7 @@ def _label_point(path: str) -> tuple[float, float]:
 MAP_STYLE = """
 <style>
 .jev-map{background:radial-gradient(circle at 50% 35%,#0f1a2e 0%,#0b1220 70%);
-  border:1px solid #1e293b;border-radius:10px;padding:6px;margin:0 0 22px;}
+  border:1px solid #1e293b;border-radius:10px;padding:6px;margin:0 0 32px;}
 /* 高さの上限は、右にある都県一覧＋凡例(「この地図の見方」)の下端に合わせた値。
    一覧は関東8都県で固定なので、実測した高さをそのまま使っている。 */
 .jev-map svg{width:100%;height:auto;display:block;margin:0 auto;
