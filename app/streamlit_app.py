@@ -506,11 +506,11 @@ def _supplement(judged: JudgedMessage, key: str) -> str:
     answer = judged.answer(key) if judged else None
     if answer is None:
         return (
-            f'<div style="flex:1;padding:10px 12px;background:{PANEL};border-radius:10px;'
-            f'border:1px solid {LINE};display:flex;flex-direction:column;'
-            f'justify-content:center;">'
-            f'<div style="font-size:0.72rem;color:{MUTED};">--</div>'
-            f'<div style="font-size:1.3rem;color:{MUTED};">--</div></div>'
+            f'<div style="flex:1;padding:7px 12px;background:{PANEL};border-radius:10px;'
+            f'border:1px solid {LINE};display:flex;align-items:center;'
+            f'justify-content:space-between;">'
+            f'<span style="font-size:0.72rem;color:{MUTED};">--</span>'
+            f'<span style="font-size:1.2rem;color:{MUTED};">--</span></div>'
         )
 
     ratio = answer.scale_ratio()
@@ -519,14 +519,17 @@ def _supplement(judged: JudgedMessage, key: str) -> str:
     else:
         shown = f"{float(answer.value):.2f}"
     color = "#f87171" if ratio >= 0.7 else ("#38bdf8" if ratio >= 0.4 else MUTED)
+    # ラベルと値を横一列にして、バーと合わせて2行に収める
     return (
-        f'<div style="flex:1;padding:10px 12px;background:{PANEL};border-radius:10px;'
+        f'<div style="flex:1;padding:7px 12px;background:{PANEL};border-radius:10px;'
         f'border:1px solid {LINE};display:flex;flex-direction:column;'
-        f'justify-content:center;">'
-        f'<div style="font-size:0.72rem;color:{MUTED};">{answer.label}</div>'
-        f'<div style="font-size:1.3rem;font-weight:700;color:{color};'
-        f'font-variant-numeric:tabular-nums;line-height:1.2;">{shown}</div>'
-        f'<div style="margin-top:6px;">{bar(ratio, color)}</div>'
+        f'justify-content:center;gap:5px;">'
+        f'<div style="display:flex;align-items:baseline;gap:8px;white-space:nowrap;">'
+        f'<span style="font-size:0.72rem;color:{MUTED};">{answer.label}</span>'
+        f'<span style="margin-left:auto;font-size:1.2rem;font-weight:700;color:{color};'
+        f'font-variant-numeric:tabular-nums;line-height:1.15;">{shown}</span>'
+        "</div>"
+        f"{bar(ratio, color)}"
         "</div>"
     )
 
@@ -554,14 +557,14 @@ def render_conclusion(thresholds: dict) -> None:
         headline, headline_sub = action_label(top.action)
         sub = (
             f"{top.title or top.kind}　|　{top.author}　|　"
-            f"{jst_time(top.updated, '%m月%d日 %H:%M')} JST"
+            f"{jst_time(top.updated, '%m/%d %H:%M')}"
         )
 
-    # 副題(警戒レベル相当)。該当が無いときは出さない
+    # 副題(警戒レベル相当)は、見出しと同じ行の右端に置いて縦幅を使わない
     subtitle = (
-        f'<div style="font-size:0.7rem;font-weight:600;letter-spacing:0.04em;'
-        f'color:{text};opacity:0.7;margin-top:2px;" title="{ALERT_LEVEL_NOTE}">'
-        f"{headline_sub}</div>"
+        f'<span style="margin-left:auto;font-size:0.7rem;font-weight:600;'
+        f'letter-spacing:0.04em;color:{text};opacity:0.75;" '
+        f'title="{ALERT_LEVEL_NOTE}">{headline_sub}</span>'
         if headline_sub
         else ""
     )
@@ -570,13 +573,17 @@ def render_conclusion(thresholds: dict) -> None:
     # 関連度マップをスクロールなしで見える位置まで押し上げるため。
     conclusion = (
         f'<div style="flex:2.3;background:{PANEL};border:1px solid {LINE};'
-        f'border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;'
-        f'justify-content:center;">'
-        f'<div style="font-size:0.72rem;color:{MUTED};">いま取るべき行動</div>'
-        f'<div style="font-size:1.55rem;font-weight:700;line-height:1.2;color:{text};'
-        f'margin-top:1px;">{headline}</div>'
-        f"{subtitle}"
-        f'<div style="font-size:0.72rem;color:{MUTED};margin-top:4px;'
+        f'border-radius:10px;padding:7px 14px;display:flex;flex-direction:column;'
+        f'justify-content:center;gap:1px;">'
+        # 1行目: 見出しと警戒レベル相当
+        f'<div style="display:flex;align-items:baseline;gap:8px;white-space:nowrap;">'
+        f'<span style="font-size:0.72rem;color:{MUTED};">いま取るべき行動</span>'
+        f"{subtitle}</div>"
+        # 2行目: 行動
+        f'<div style="font-size:1.5rem;font-weight:700;line-height:1.25;color:{text};">'
+        f"{headline}</div>"
+        # 3行目: 根拠の電文
+        f'<div style="font-size:0.7rem;color:{MUTED};'
         f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{sub}</div>'
         "</div>"
     )
