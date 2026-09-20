@@ -507,7 +507,7 @@ def render_conclusion(thresholds: dict) -> None:
     top = relevant[0] if relevant else None
 
     if top is None:
-        background, border, text = BANNER_NONE
+        text = MUTED
         headline = "関係する情報はまだありません"
         headline_sub = ""
         sub = (
@@ -515,7 +515,8 @@ def render_conclusion(thresholds: dict) -> None:
             "まだ判定されていません。"
         )
     else:
-        background, border, text = ACTION_BANNER.get(top.action, BANNER_NONE)
+        # 文字だけを行動の色にする。器は右の補足指標と同じ見た目に揃える
+        text = ACTION_COLORS.get(top.action, MUTED)
         headline, headline_sub = action_label(top.action)
         sub = (
             f"{top.title or top.kind}　|　{top.author}　|　"
@@ -524,8 +525,8 @@ def render_conclusion(thresholds: dict) -> None:
 
     # 副題(警戒レベル相当)。該当が無いときは出さない
     subtitle = (
-        f'<div style="font-size:0.72rem;font-weight:600;letter-spacing:0.04em;'
-        f'color:{text};opacity:0.62;margin-top:3px;" title="{ALERT_LEVEL_NOTE}">'
+        f'<div style="font-size:0.7rem;font-weight:600;letter-spacing:0.04em;'
+        f'color:{text};opacity:0.7;margin-top:2px;" title="{ALERT_LEVEL_NOTE}">'
         f"{headline_sub}</div>"
         if headline_sub
         else ""
@@ -534,22 +535,21 @@ def render_conclusion(thresholds: dict) -> None:
     # 結論と補足指標を横一列に並べる。結論の右が空くのを避け、
     # 関連度マップをスクロールなしで見える位置まで押し上げるため。
     conclusion = (
-        f'<div style="flex:2.3;background:{background};border:2px solid {border};'
-        f'border-radius:10px;padding:12px 18px;display:flex;flex-direction:column;'
+        f'<div style="flex:2.3;background:{PANEL};border:1px solid {LINE};'
+        f'border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;'
         f'justify-content:center;">'
-        f'<div style="font-size:0.72rem;color:{text};opacity:0.8;letter-spacing:0.08em;">'
-        f"いま取るべき行動</div>"
-        f'<div style="font-size:1.7rem;font-weight:700;line-height:1.2;color:{text};'
-        f'margin-top:2px;">{headline}</div>'
+        f'<div style="font-size:0.72rem;color:{MUTED};">いま取るべき行動</div>'
+        f'<div style="font-size:1.55rem;font-weight:700;line-height:1.2;color:{text};'
+        f'margin-top:1px;">{headline}</div>'
         f"{subtitle}"
-        f'<div style="font-size:0.75rem;color:{text};opacity:0.85;margin-top:4px;'
+        f'<div style="font-size:0.72rem;color:{MUTED};margin-top:4px;'
         f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{sub}</div>'
         "</div>"
     )
     supplements = "".join(_supplement(top, key) for key in ("imminent", "severity", "impact"))
 
     st.markdown(
-        f'<div style="display:flex;gap:10px;align-items:stretch;margin:2px 0 14px;">'
+        f'<div style="display:flex;gap:10px;align-items:stretch;margin:2px 0 0;">'
         f"{conclusion}{supplements}</div>",
         unsafe_allow_html=True,
     )
@@ -641,7 +641,8 @@ def render_ticker(thresholds: dict) -> None:
     judged_all = visible_judgements(thresholds)
     if not judged_all:
         st.markdown(
-            '<div class="jev-ticker empty">判定を待っています…</div>',
+            f'<div class="jev-ticker empty" style="border-color:{LINE};">'
+            "判定を待っています…</div>",
             unsafe_allow_html=True,
         )
         return
@@ -655,10 +656,14 @@ def render_ticker(thresholds: dict) -> None:
         else "#7c3aed" if judged.relevance >= 0.5
         else "#64748b"
     )
+    # 判定した行動の色で枠を描く。この1行がこの画面の主役なので、
+    # いちばん目を引く見た目にする(結論バナーは右の指標と同じ器に落としてある)
+    background, border, _ = ACTION_BANNER.get(judged.action, BANNER_NONE)
 
     st.markdown(
-        f'<div class="jev-ticker{"" if relevant else " dim"}">'
-        '<span class="dot"></span>'
+        f'<div class="jev-ticker{"" if relevant else " dim"}" '
+        f'style="background:{background};border-color:{border};">'
+        f'<span class="dot" style="background:{border};"></span>'
         f'<span class="t">{jst_time(judged.updated, "%H:%M")}</span>'
         f'<span class="kind">{judged.kind}</span>'
         f'<span class="who">{judged.author}</span>'
@@ -677,15 +682,13 @@ TICKER_STYLE = """
 @keyframes jev-tick{from{opacity:0;transform:translateX(-10px);}
   to{opacity:1;transform:translateX(0);}}
 .jev-ticker{display:flex;align-items:center;gap:12px;white-space:nowrap;overflow:hidden;
-  padding:7px 14px;margin:0 0 12px;border-radius:8px;
-  background:linear-gradient(90deg,rgba(56,189,248,.10),rgba(18,28,46,.55) 40%);
-  border:1px solid #1e293b;border-left:3px solid #38bdf8;
-  font-size:.82rem;animation:jev-tick .35s ease-out;}
-.jev-ticker.dim{border-left-color:#334155;opacity:.55;}
-.jev-ticker.empty{color:#64748b;border-left-color:#334155;}
-.jev-ticker .dot{width:7px;height:7px;border-radius:50%;background:#38bdf8;flex:none;
+  padding:10px 16px;margin:14px 0;border-radius:10px;
+  border:2px solid #334155;background:rgba(18,28,46,.55);
+  font-size:.84rem;animation:jev-tick .35s ease-out;}
+.jev-ticker.dim{opacity:.5;}
+.jev-ticker.empty{color:#64748b;background:#121c2e;border-width:1px;}
+.jev-ticker .dot{width:8px;height:8px;border-radius:50%;background:#475569;flex:none;
   animation:blink 1.4s infinite;}
-.jev-ticker.dim .dot{background:#475569;}
 .jev-ticker .t{color:#94a3b8;font-variant-numeric:tabular-nums;flex:none;}
 .jev-ticker .kind{font-weight:600;overflow:hidden;text-overflow:ellipsis;}
 .jev-ticker .who{color:#94a3b8;flex:none;}

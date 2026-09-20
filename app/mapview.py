@@ -293,7 +293,7 @@ def _label_point(path: str) -> tuple[float, float]:
 MAP_STYLE = """
 <style>
 .jev-map{background:radial-gradient(circle at 50% 35%,#0f1a2e 0%,#0b1220 70%);
-  border:1px solid #1e293b;border-radius:10px;padding:6px;margin-top:10px;}
+  border:1px solid #1e293b;border-radius:10px;padding:6px;margin:0 0 14px;}
 .jev-map svg{width:100%;height:auto;display:block;}
 .jev-map .pref{transition:fill .8s ease,opacity .8s ease,stroke .8s ease;}
 .jev-map .lbl{fill:#f8fafc;font-size:11px;font-weight:700;text-anchor:middle;
