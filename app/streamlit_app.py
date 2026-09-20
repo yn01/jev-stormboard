@@ -1,4 +1,4 @@
-"""jev-stormboard の画面。
+"""東京の防災電文、Jevで判定してみた — 画面。
 
     streamlit run app/streamlit_app.py
 
@@ -97,7 +97,11 @@ LINE = "#1e293b"     # 罫線
 PANEL = "#121c2e"    # カード背景
 TRACK = "#1e293b"    # バーの下地
 
-st.set_page_config(page_title="jev-stormboard", page_icon="🌀", layout="wide")
+# 画面に出すタイトル。タブは幅が狭いので短いほうを使う
+APP_TITLE = "東京の防災電文、Jevで判定してみた"
+TAB_TITLE = "東京の防災電文 × Jev"
+
+st.set_page_config(page_title=TAB_TITLE, page_icon="🌀", layout="wide")
 
 
 # ---------------------------------------------------------------- 共有リソース
@@ -373,7 +377,7 @@ def header_html(profile: dict) -> str:
     return (
         '<div style="display:flex;align-items:baseline;gap:8px;white-space:nowrap;'
         'overflow:hidden;text-overflow:ellipsis;">'
-        '<span style="font-size:1.2rem;font-weight:700;">🌀 jev-stormboard</span>'
+        f'<span style="font-size:1.05rem;font-weight:700;">🌀 {APP_TITLE}</span>'
         f"{local}"
         "</div>"
     )

@@ -1,7 +1,8 @@
-# jev-stormboard
+# 東京の防災電文、Jevで判定してみた
 
 気象庁の防災情報XML(防災電文)をリアルタイムに取り込み、TypeSafe の
-[Jev](https://typesafe.jp/) で「いま何が起きているか」を判定させる Streamlit デモです。
+[Jev](https://typesafe.jp/) で「**この電文は自分にとって何を意味するか**」を
+判定させる Streamlit デモです。リポジトリ名は `jev-stormboard`。
 防災電文は種類が多く構造も複雑なため、型で定義した判定ロジックを安全に書ける Jev が
 向いていると考え、その題材として作っています。
 
