@@ -1,4 +1,4 @@
-"""東京の防災電文 × Jev — 画面。
+"""Jev × 東京の防災電文 — 画面。
 
     streamlit run app/streamlit_app.py
 
@@ -98,7 +98,7 @@ PANEL = "#121c2e"    # カード背景
 TRACK = "#1e293b"    # バーの下地
 
 # アプリ名。画面のヘッダーとブラウザのタブで同じものを使う
-APP_TITLE = "東京の防災電文 × Jev"
+APP_TITLE = "Jev × 東京の防災電文"
 TAB_TITLE = APP_TITLE
 
 st.set_page_config(page_title=TAB_TITLE, page_icon="🌀", layout="wide")

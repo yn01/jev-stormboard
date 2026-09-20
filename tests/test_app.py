@@ -471,7 +471,7 @@ def test_アプリ名が画面とドキュメントで揃っている():
 
     from app.streamlit_app import APP_TITLE, TAB_TITLE
 
-    assert APP_TITLE == "東京の防災電文 × Jev"
+    assert APP_TITLE == "Jev × 東京の防災電文"
     # 画面のヘッダーとブラウザのタブで同じ名前を使う
     assert TAB_TITLE == APP_TITLE
 
