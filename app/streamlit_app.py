@@ -682,7 +682,7 @@ TICKER_STYLE = """
 @keyframes jev-tick{from{opacity:0;transform:translateX(-10px);}
   to{opacity:1;transform:translateX(0);}}
 .jev-ticker{display:flex;align-items:center;gap:12px;white-space:nowrap;overflow:hidden;
-  padding:10px 16px;margin:14px 0;border-radius:10px;
+  padding:10px 16px;margin:28px 0;border-radius:10px;
   border:2px solid #334155;background:rgba(18,28,46,.55);
   font-size:.84rem;animation:jev-tick .35s ease-out;}
 .jev-ticker.dim{opacity:.5;}
