@@ -346,12 +346,8 @@ def render_sidebar() -> dict:
         replay_start=replay_start,
     )
 
-    st.sidebar.divider()
-    # 件数は指標の帯が2秒ごとに更新するので、ここでは出さない(食い違って見えるため)
-    st.sidebar.caption(
-        "判定結果は `data/judged/` に保存され、同じ電文は二重に判定しません。"
-        "リプレイを繰り返しても API のコストは増えません。"
-    )
+    # 判定結果の保存やキャッシュの説明は、画面には出さない(README に書いてある)。
+    # 件数は「Jev の性能」の帯に出ている。
     return {
         "relevance": relevance_threshold,
         "noul": noul_threshold,
@@ -363,22 +359,16 @@ def render_sidebar() -> dict:
 
 
 def header_html(profile: dict) -> str:
-    """タイトルとプロファイル。1行に収める。
+    """アプリ名。1行に収める。
 
-    読み込み元は、自分用の profile.local.yaml を使っているときだけ出す。
-    公開用の profile.yaml のときは既定なので、出すと横幅を食うだけになる。
+    読み込み元(profile.yaml / profile.local.yaml)はここには出さない。
+    画面上部に出すと、公開用の画面を撮るときに邪魔になるため。
+    どちらを読んだかは、下の「Jev の性能」の行に出している。
     """
-    local = (
-        f'<span style="font-size:0.7rem;color:#38bdf8;opacity:.85;">'
-        f"{profile.get('_source', '')}</span>"
-        if profile.get("_is_local")
-        else ""
-    )
     return (
         '<div style="display:flex;align-items:baseline;gap:8px;white-space:nowrap;'
         'overflow:hidden;text-overflow:ellipsis;">'
         f'<span style="font-size:1.05rem;font-weight:700;">🌀 {APP_TITLE}</span>'
-        f"{local}"
         "</div>"
     )
 
@@ -758,18 +748,9 @@ def render_map(thresholds: dict, profile: dict) -> None:
                 f'<div style="width:52px;text-align:right;">{severity}</div>'
                 "</div>"
             )
-        # 地図は関東圏なので、注記も関東の中の1位にする。
-        # 全国の1位を出すと、一覧に無い県の名前が出て食い違って見える
-        top = next((s for s in stats if s.count and s.top_title), None)
-        if top:
-            rows.append(
-                f'<div style="color:{MUTED};font-size:0.75rem;margin-top:10px;'
-                f'border-top:1px solid {LINE};padding-top:8px;">'
-                f"{top.name}が最も高いのは、"
-                f"「{top.top_title[:26]}」の判定によるものです。</div>"
-            )
         # 凡例は一覧の下に置く。一覧には色のバーと円が並んでいるので、
-        # そのすぐ下にあると色と大きさの意味を突き合わせやすい
+        # そのすぐ下にあると色と大きさの意味を突き合わせやすい。
+        # どの電文で関連度が最大になったかは、地図のホバーで出る
         rows.append(legend_html())
         st.markdown("".join(rows), unsafe_allow_html=True)
 
