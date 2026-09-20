@@ -334,9 +334,18 @@ def render_sidebar() -> dict:
         )
 
         speed_label = st.sidebar.select_slider(
-            "再生速度", options=["1倍", "10倍", "60倍", "100倍"], value="60倍"
+            "再生速度",
+            options=["1倍", "10倍", "60倍", "100倍", "最速"],
+            value="60倍",
+            help=(
+                "「最速」は電文の間隔を無視して一気に流します。"
+                "判定済みなら API を呼ばないので、1日分を数十秒で流し切れます。"
+            ),
         )
-        replay_speed = {"1倍": 1, "10倍": 10, "60倍": 60, "100倍": 100}[speed_label]
+        # 「最速」は 0。エンジン側で「待たない」の意味になる
+        replay_speed = {"1倍": 1, "10倍": 10, "60倍": 60, "100倍": 100, "最速": 0}[
+            speed_label
+        ]
 
     engine.set_mode(
         "replay" if mode_label == "リプレイ" else "live",
@@ -391,7 +400,8 @@ def render_mode_bar(profile: dict) -> None:
 
     with middle:
         if status.mode == "replay":
-            state = "一時停止" if status.paused else f"{status.replay_speed}倍"
+            speed_text = "最速" if status.replay_speed <= 0 else f"{status.replay_speed}倍"
+            state = "一時停止" if status.paused else speed_text
             # 件数まで入れると横に収まらないので、状態と時刻だけにする
             progress = ""
             # 「09/20 00:01」の時刻部分だけ。日付はバッジの先頭に出ている
@@ -625,47 +635,74 @@ def render_profile_notice(profile: dict, engine: Engine) -> None:
     st.warning("\n\n".join(lines))
 
 
-def render_ticker(thresholds: dict) -> None:
-    """判定した電文を1行で流す速報欄。
+# 速報欄に積み上げる行数。1秒の更新のあいだに判定された分が
+# まとめて現れるので、次々にさばいている様子が見える
+TICKER_ROWS = 7
 
-    結論バナーと地図の間に置く。見出しは付けず、いちばん新しい判定を
-    1行だけ出す。更新のたびに中身が入れ替わるので、電文が次々に
-    判定されていく様子がそのまま伝わる。
-    """
-    judged_all = visible_judgements(thresholds)
-    if not judged_all:
-        st.markdown(
-            f'<div class="jev-ticker empty" style="border-color:{LINE};">'
-            "判定を待っています…</div>",
-            unsafe_allow_html=True,
-        )
-        return
 
-    judged = judged_all[0]
+def _ticker_row(judged: JudgedMessage, thresholds: dict, newest: bool) -> str:
+    """速報欄の1行。"""
     relevant = judged.relevance >= thresholds["relevance"]
     action_color = ACTION_COLORS.get(judged.action, MUTED)
-    # 関連度の色は地図と揃える(青紫系)
     relevance_color = (
         "#d946ef" if judged.relevance >= 0.75
         else "#7c3aed" if judged.relevance >= 0.5
         else "#64748b"
     )
-    # 判定した行動の色で枠を描く。この1行がこの画面の主役なので、
-    # いちばん目を引く見た目にする(結論バナーは右の指標と同じ器に落としてある)
-    background, border, _ = ACTION_BANNER.get(judged.action, BANNER_NONE)
+    _, border, _ = ACTION_BANNER.get(judged.action, BANNER_NONE)
+    classes = "row" + ("" if relevant else " dim") + (" newest" if newest else "")
 
-    st.markdown(
-        f'<div class="jev-ticker{"" if relevant else " dim"}" '
-        f'style="background:{background};border-color:{border};">'
+    return (
+        f'<div class="{classes}">'
         f'<span class="dot" style="background:{border};"></span>'
         f'<span class="t">{jst_time(judged.updated, "%H:%M")}</span>'
         f'<span class="kind">{judged.kind}</span>'
         f'<span class="who">{judged.author}</span>'
         f'<span class="rel" style="color:{relevance_color};">'
-        f"関連度 {judged.relevance:.2f}</span>"
-        f'<span class="act" style="color:{action_color};">{action_label(judged.action)[0]}</span>'
+        f"{judged.relevance:.2f}</span>"
+        f'<span class="act" style="color:{action_color};">'
+        f"{action_label(judged.action)[0]}</span>"
         f'<span class="ms">{judged.latency_ms:.0f}ms</span>'
-        f'<span class="q">{judged.question_count}問</span>'
+        "</div>"
+    )
+
+
+def render_ticker(thresholds: dict) -> None:
+    """判定した電文を流す速報欄。この画面の主役。
+
+    最新1件だけだと、1秒のあいだに判定された分が見えないまま流れてしまう。
+    直近 TICKER_ROWS 件を積み上げて、次々にさばいている様子を見せる。
+    右上には、いま毎秒どれだけ判定しているかを出す(Jev の主張そのもの)。
+    """
+    engine = get_engine()
+    judged_all = visible_judgements(thresholds)
+    metrics = engine.metrics
+
+    per_second = metrics.per_second
+    if per_second >= 0.05:
+        rate = (
+            f'<span class="rate"><b>{per_second:.1f}</b> 件/秒'
+            f'<span class="q">{metrics.questions_per_second:,.0f} 問/秒</span></span>'
+        )
+    else:
+        rate = '<span class="rate idle">待機中</span>'
+
+    if not judged_all:
+        body = '<div class="row dim"><span class="kind">判定を待っています…</span></div>'
+    else:
+        body = "".join(
+            _ticker_row(j, thresholds, newest=(i == 0))
+            for i, j in enumerate(judged_all[:TICKER_ROWS])
+        )
+
+    # いちばん新しい判定の行動で、枠の色を決める
+    top = judged_all[0] if judged_all else None
+    _, border, _ = ACTION_BANNER.get(top.action if top else "", BANNER_NONE)
+
+    st.markdown(
+        f'<div class="jev-ticker" style="border-color:{border};">'
+        f'<div class="head"><span class="lead">判定した電文</span>{rate}</div>'
+        f"{body}"
         "</div>",
         unsafe_allow_html=True,
     )
@@ -675,20 +712,31 @@ TICKER_STYLE = """
 <style>
 @keyframes jev-tick{from{opacity:0;transform:translateX(-10px);}
   to{opacity:1;transform:translateX(0);}}
-.jev-ticker{display:flex;align-items:center;gap:12px;white-space:nowrap;overflow:hidden;
-  padding:10px 16px;margin:28px 0;border-radius:10px;
-  border:2px solid #334155;background:rgba(18,28,46,.55);
-  font-size:.84rem;animation:jev-tick .35s ease-out;}
-.jev-ticker.dim{opacity:.5;}
-.jev-ticker.empty{color:#64748b;background:#121c2e;border-width:1px;}
-.jev-ticker .dot{width:8px;height:8px;border-radius:50%;background:#475569;flex:none;
-  animation:blink 1.4s infinite;}
-.jev-ticker .t{color:#94a3b8;font-variant-numeric:tabular-nums;flex:none;}
+.jev-ticker{margin:28px 0;padding:10px 14px 8px;border-radius:10px;
+  border:2px solid #334155;background:rgba(18,28,46,.55);font-size:.8rem;}
+.jev-ticker .head{display:flex;align-items:baseline;gap:10px;
+  padding-bottom:6px;margin-bottom:4px;border-bottom:1px solid #1e293b;}
+.jev-ticker .lead{font-size:.72rem;color:#64748b;letter-spacing:.06em;}
+.jev-ticker .rate{margin-left:auto;color:#38bdf8;font-size:.78rem;
+  font-variant-numeric:tabular-nums;white-space:nowrap;}
+.jev-ticker .rate b{font-size:1.05rem;font-weight:700;}
+.jev-ticker .rate .q{color:#64748b;margin-left:10px;}
+.jev-ticker .rate.idle{color:#475569;}
+.jev-ticker .row{display:flex;align-items:center;gap:12px;white-space:nowrap;
+  overflow:hidden;padding:2px 0;line-height:1.5;}
+.jev-ticker .row.newest{animation:jev-tick .35s ease-out;}
+.jev-ticker .row.dim{opacity:.38;}
+.jev-ticker .dot{width:7px;height:7px;border-radius:50%;background:#475569;flex:none;}
+.jev-ticker .row.newest .dot{animation:blink 1.4s infinite;}
+.jev-ticker .t{color:#94a3b8;font-variant-numeric:tabular-nums;flex:none;width:44px;}
 .jev-ticker .kind{font-weight:600;overflow:hidden;text-overflow:ellipsis;}
-.jev-ticker .who{color:#94a3b8;flex:none;}
-.jev-ticker .rel{font-variant-numeric:tabular-nums;flex:none;margin-left:auto;}
-.jev-ticker .act{flex:none;}
-.jev-ticker .ms,.jev-ticker .q{color:#64748b;font-variant-numeric:tabular-nums;flex:none;}
+.jev-ticker .who{color:#94a3b8;flex:none;overflow:hidden;text-overflow:ellipsis;
+  max-width:140px;}
+.jev-ticker .rel{font-variant-numeric:tabular-nums;flex:none;margin-left:auto;width:34px;
+  text-align:right;}
+.jev-ticker .act{flex:none;width:92px;}
+.jev-ticker .ms{color:#64748b;font-variant-numeric:tabular-nums;flex:none;width:52px;
+  text-align:right;}
 </style>
 """
 

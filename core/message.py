@@ -22,6 +22,12 @@ INDEX_PATH = ROOT / "data" / "index.jsonl"
 # 本文が長くなりすぎないよう、Jev に渡すテキストの上限
 MAX_BODY_CHARS = 4000
 
+# state に載せる地域の上限。
+# 「気象警報・注意報(Ｒ０６)(集約通報)」は全国 1,100 地域あまりを含み、
+# そのまま渡すと 33,000 文字(約16,500トークン)になって Jev の上限を超える。
+# 判定に効くのはその人の都道府県なので、そこを優先して残す。
+MAX_AREAS = 40
+
 
 def strip_namespaces(root: ET.Element) -> ET.Element:
     """パース後のツリーから名前空間を落とし、タグを local name にする。"""
@@ -77,8 +83,12 @@ class Message:
     areas: list[Area] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)  # 発表中の警報・注意報のまとめ
 
-    def to_state(self) -> dict:
-        """Jev の state に入れる辞書にする。"""
+    def to_state(self, prefer_prefix: str = "") -> dict:
+        """Jev の state に入れる辞書にする。
+
+        prefer_prefix に都道府県コード(2桁)を渡すと、地域を絞るときに
+        その都道府県のものを先に残す。
+        """
         state: dict = {
             "kind": self.kind,
             "title": self.title,
@@ -93,10 +103,36 @@ class Message:
         if self.body_text:
             state["body_text"] = self.body_text[:MAX_BODY_CHARS]
         if self.areas:
-            state["areas"] = [a.describe() for a in self.areas]
+            areas = self._pick_areas(prefer_prefix)
+            state["areas"] = [a.describe() for a in areas]
+            if len(areas) < len(self.areas):
+                state["areas_note"] = (
+                    f"このほかに {len(self.areas) - len(areas)} 地域が対象だが省略した"
+                )
         if self.warnings:
             state["warnings"] = self.warnings
         return state
+
+    def _pick_areas(self, prefer_prefix: str = "") -> list["Area"]:
+        """state に載せる地域を選ぶ。
+
+        全国を対象とする電文は地域が 1,000 件を超えることがあり、そのまま渡すと
+        Jev の入力上限に当たる(max_tokens_exceeded)。その人の都道府県を先に残し、
+        残りの枠を他の地域で埋める。
+        """
+        if len(self.areas) <= MAX_AREAS:
+            return list(self.areas)
+
+        mine = [
+            a for a in self.areas if prefer_prefix and a.code.startswith(prefer_prefix)
+        ][:MAX_AREAS]
+        picked = list(mine)
+        for area in self.areas:
+            if len(picked) >= MAX_AREAS:
+                break
+            if area not in mine:
+                picked.append(area)
+        return picked
 
 
 # ---------------------------------------------------------------- 抽出

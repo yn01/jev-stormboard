@@ -163,8 +163,10 @@ def build_state(message: Message, profile: dict) -> dict:
     電文の見出しと本文、発表官署、発表時刻、対象地域、そしてプロファイルを含める
     (requirements.md R-25)。
     """
+    # 地域を絞るときに、この人の都道府県を先に残す
+    prefix = str(profile.get("area_code", ""))[:2]
     return {
-        "message": message.to_state(),
+        "message": message.to_state(prefer_prefix=prefix),
         "person": {
             "name": profile.get("name", ""),
             "pref": profile.get("pref", ""),

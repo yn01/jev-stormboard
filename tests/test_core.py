@@ -266,3 +266,46 @@ def test_公開用プロファイルに市区町村を書かない():
     # 公開用は府県予報区コード(6桁)までにとどめる。市区町村コードは7桁
     assert len(str(profile["area_code"])) == 6
     assert not profile.get("city")
+
+
+# ---------------------------------------------------------------- 地域の絞り込み
+
+
+def test_地域が多すぎる電文は絞る():
+    """「集約通報」は全国 1,100 地域あまりを含み、そのまま渡すと
+    Jev の入力上限に当たる(max_tokens_exceeded)。
+    """
+    from core.message import MAX_AREAS, Area, Message
+
+    message = Message(kind="集約通報")
+    message.areas = [Area(name=f"地域{i}", code=f"{i // 20 + 10:02d}0000") for i in range(500)]
+
+    state = message.to_state()
+    assert len(state["areas"]) == MAX_AREAS
+    assert "areas_note" in state
+    assert "460" in state["areas_note"]  # 500 - 40
+
+
+def test_自分の都道府県の地域を先に残す():
+    from core.message import Area, Message
+
+    message = Message(kind="集約通報")
+    # 他県を大量に、東京(13)を後ろに置く
+    message.areas = [Area(name=f"他{i}", code="010000") for i in range(200)]
+    message.areas += [Area(name="東京都", code="130000"), Area(name="東京地方", code="130010")]
+
+    state = message.to_state(prefer_prefix="13")
+    # 絞っても東京が落ちない
+    assert any("東京都" in a for a in state["areas"])
+    assert any("東京地方" in a for a in state["areas"])
+
+
+def test_地域が少なければそのまま():
+    from core.message import Area, Message
+
+    message = Message(kind="警報")
+    message.areas = [Area(name="東京都", code="130000")]
+
+    state = message.to_state(prefer_prefix="13")
+    assert len(state["areas"]) == 1
+    assert "areas_note" not in state

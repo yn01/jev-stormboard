@@ -478,3 +478,59 @@ def test_アプリ名が画面とドキュメントで揃っている():
     for name in ("README.md", "requirements.md", "CLAUDE.md"):
         text = pathlib.Path(name).read_text(encoding="utf-8")
         assert APP_TITLE in text, name
+
+
+# ---------------------------------------------------------------- スループット
+
+
+def test_毎秒の判定数と問数を出せる():
+    import time
+
+    from app.engine import Metrics
+
+    m = Metrics(question_count=50)
+    assert m.per_second == 0.0  # まだ何も判定していない
+
+    for _ in range(12):
+        m.note_judged(400.0)
+        time.sleep(0.02)
+
+    assert m.per_second > 0
+    # 問/秒 = 件/秒 × 質問数。Jev の主張そのもの
+    assert m.questions_per_second > m.per_second  # 質問数のぶん大きくなる
+    assert m.question_count == 50
+
+
+def test_古い判定はスループットに数えない():
+    import time
+
+    from app.engine import THROUGHPUT_WINDOW_SEC, Metrics
+
+    m = Metrics()
+    # 窓より前の時刻を直接入れる
+    old = time.monotonic() - THROUGHPUT_WINDOW_SEC - 10
+    m.recent.extend([old, old + 0.1])
+
+    assert m.per_second == 0.0
+
+
+def test_最速は速度0で表す():
+    from app.engine import Engine
+
+    assert Engine._speed_label(0) == "最速"
+    assert Engine._speed_label(60) == "60倍速"
+
+    import pathlib
+
+    source = pathlib.Path("app/streamlit_app.py").read_text(encoding="utf-8")
+    assert '"最速": 0' in source
+    # 速度が0以下なら待たない
+    engine_src = pathlib.Path("app/engine.py").read_text(encoding="utf-8")
+    assert "if speed > 0:" in engine_src
+
+
+def test_速報欄は複数行を積み上げる():
+    """最新1件だけだと、1秒のあいだに判定された分が見えないまま流れてしまう。"""
+    from app.streamlit_app import TICKER_ROWS
+
+    assert TICKER_ROWS >= 5

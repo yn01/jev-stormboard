@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -52,6 +53,10 @@ REPLAY_MAX_WAIT_BASE_SPEED = 60
 LIVE_INITIAL_BACKLOG = 20
 
 
+# スループットを数えるときに見る直近の秒数
+THROUGHPUT_WINDOW_SEC = 6.0
+
+
 @dataclass
 class Metrics:
     """指標の帯に出す数値。"""
@@ -63,6 +68,36 @@ class Metrics:
     input_tokens: int = 0
     output_tokens: int = 0
     question_count: int = DEFAULT_QUESTION_COUNT
+
+    # 直近に判定した時刻(monotonic)。毎秒何件さばけているかを出すために持つ
+    recent: deque = field(default_factory=lambda: deque(maxlen=400))
+    # 直近のレイテンシ。ばらつきを見せるために持つ
+    recent_latency: deque = field(default_factory=lambda: deque(maxlen=40))
+
+    def note_judged(self, latency_ms: float) -> None:
+        self.recent.append(time.monotonic())
+        self.recent_latency.append(latency_ms)
+
+    @property
+    def per_second(self) -> float:
+        """直近の「毎秒何件判定したか」。
+
+        Jev の速さは1件あたりのレイテンシだけでなく、どれだけさばけるかで
+        伝わる。直近数秒だけを見て、いまの勢いを出す。
+        """
+        if not self.recent:
+            return 0.0
+        now = time.monotonic()
+        recent = [t for t in self.recent if now - t <= THROUGHPUT_WINDOW_SEC]
+        if len(recent) < 2:
+            return 0.0
+        span = now - recent[0]
+        return len(recent) / span if span > 0 else 0.0
+
+    @property
+    def questions_per_second(self) -> float:
+        """毎秒いくつの質問に答えているか。これが Jev の主張そのもの。"""
+        return self.per_second * self.question_count
 
     @property
     def average_latency_ms(self) -> float:
@@ -149,6 +184,9 @@ class Engine:
 
         # リプレイの一時停止。画面のボタンから切り替える
         self._paused = threading.Event()
+
+        # 何度試しても判定できない電文。再試行して再生が止まらないよう覚えておく
+        self._giving_up: set[str] = set()
 
     # ------------------------------------------------------------ 起動と停止
 
@@ -400,7 +438,7 @@ class Engine:
             self._sleep(2.0)
             return
 
-        self.status.message = f"リプレイ: {day} を {speed}倍速で再生中"
+        self.status.message = f"リプレイ: {day} を {self._speed_label(speed)}で再生中"
         previous: datetime | None = None
 
         for record in records:
@@ -411,20 +449,25 @@ class Engine:
             if self._stop.is_set() or self._changed(generation):
                 return
             if not self.status.paused:
-                self.status.message = f"リプレイ: {day} を {speed}倍速で再生中"
+                self.status.message = (
+                    f"リプレイ: {day} を {self._speed_label(speed)}で再生中"
+                )
 
             current = self._updated_dt(record)
             if previous is not None and current is not None:
-                gap = (current - previous).total_seconds() / max(1, speed)
-                # 待ちが長くなりすぎないよう上限をかける(デモが止まって見えないように)。
-                # 上限は速度に応じて縮める(60倍で3秒、100倍で1.8秒)
-                if gap > 0:
-                    limit = REPLAY_MAX_WAIT_SEC * min(
-                        1.0, REPLAY_MAX_WAIT_BASE_SPEED / max(1, speed)
-                    )
-                    self._sleep(min(gap, limit))
-                    if self._stop.is_set() or self._changed(generation):
-                        return
+                # speed が 0 以下なら「最速」。時刻の間隔を無視して一気に流す。
+                # 判定済みなら API を呼ばないので、1日分を数十秒で流し切れる。
+                if speed > 0:
+                    gap = (current - previous).total_seconds() / speed
+                    # 待ちが長くなりすぎないよう上限をかける(デモが止まって見えないように)。
+                    # 上限は速度に応じて縮める(60倍で3秒、100倍で1.8秒)
+                    if gap > 0:
+                        limit = REPLAY_MAX_WAIT_SEC * min(
+                            1.0, REPLAY_MAX_WAIT_BASE_SPEED / speed
+                        )
+                        self._sleep(min(gap, limit))
+                        if self._stop.is_set() or self._changed(generation):
+                            return
             previous = current
 
             # 再生位置を進める。画面はこの時刻までの電文だけを表示する
@@ -454,7 +497,14 @@ class Engine:
         if not record.full_path.exists():
             return
 
-        from typesafe_sdk import TypeSafeError, TypeSafeRateLimitError
+        from typesafe_sdk import (
+            TypeSafeBadRequestError,
+            TypeSafeError,
+            TypeSafeRateLimitError,
+        )
+
+        if record.id in self._giving_up:
+            return  # 前に「直せない理由」で失敗した電文。何度試しても同じ
 
         try:
             judgement = judge(
@@ -468,6 +518,14 @@ class Engine:
             )
             log.warning("レート制限。%.0f秒待機", RATE_LIMIT_WAIT_SEC)
             self._sleep(RATE_LIMIT_WAIT_SEC)
+            return
+        except TypeSafeBadRequestError as exc:
+            # リクエストそのものが通らない(state が大きすぎるなど)。
+            # 何度試しても同じなので、待たずに諦めて次へ進む。
+            # 待って再試行すると、同じ電文で再生が止まってしまう。
+            self._giving_up.add(record.id)
+            self.status.error = f"この電文は判定できません: {exc}"
+            log.warning("判定を諦めます %s: %s", record.id, exc)
             return
         except TypeSafeError as exc:
             self.status.error = f"判定に失敗: {exc}"
@@ -485,6 +543,7 @@ class Engine:
         self.metrics.total_count = self.store.count(count)
         self.metrics.last_latency_ms = judged.latency_ms
         self.metrics.total_latency_ms += judged.latency_ms
+        self.metrics.note_judged(judged.latency_ms)
         self.metrics.input_tokens += judged.input_tokens or 0
         self.metrics.output_tokens += judged.output_tokens or 0
         self.metrics.question_count = judged.question_count
@@ -504,6 +563,10 @@ class Engine:
             return datetime.fromisoformat(text)
         except ValueError:
             return None
+
+    @staticmethod
+    def _speed_label(speed: int) -> str:
+        return "最速" if speed <= 0 else f"{speed}倍速"
 
     @classmethod
     def _jst_hhmm(cls, record: IndexRecord) -> str:
