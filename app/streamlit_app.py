@@ -43,6 +43,34 @@ FEATURED_LIMIT = 5  # 「注目の判定」に出すカードの最大数
 STREAM_LIMIT = 60  # 「流れる電文」に出す行数
 
 # Choice action の値ごとの色。深刻なほど赤に寄せる
+# 画面に出す行動の文言。(呼びかけ, 副題)。
+#
+# **Jev に渡す選択肢の名前(core/questions.py の criteria のキー)は変えないこと。**
+# 名前を変えると、保存済みの判定結果と食い違って色が付かなくなり、
+# 揃えるには全件を判定し直すことになる。表示だけをここで差し替える。
+#
+# 副題は、内閣府「避難情報に関するガイドライン」の警戒レベルに**対応する段階**を
+# 目安として示したもの。**「相当」を必ず付けること。**
+# 警戒レベルは地域の状況に対して行政と気象庁が出すもので、ここで出しているのは
+# 「この人の事情を踏まえた個人の行動」なので、別物である。言い切ると
+# 避難指示などの発令と取り違えられる。
+ACTION_LABELS = {
+    "通常どおり": ("いつもどおりで", "平常の行動"),
+    "予定変更を検討": ("予定の見直しを", "警戒レベル1 相当"),
+    "今日中に備える": ("早めの備えを", "警戒レベル2 相当"),
+    "外出を控える": ("外出は控えて", "警戒レベル3 相当"),
+    "早めの避難を検討": ("早めの避難を", "警戒レベル4 相当"),
+}
+
+# 警戒レベルの副題を出すときに添える注記
+ALERT_LEVEL_NOTE = "気象庁・自治体が出す警戒レベルの目安です。発令そのものではありません。"
+
+
+def action_label(action: str) -> tuple[str, str]:
+    """行動の表示名(呼びかけ, 副題)。知らない値はそのまま返す。"""
+    return ACTION_LABELS.get(action, (action or "判定中", ""))
+
+
 # 暗い背景の上で読める色。行動が重くなるほど赤に寄せる
 ACTION_COLORS = {
     "通常どおり": "#4ade80",
@@ -123,10 +151,12 @@ def jst_time(value: str, fmt: str = "%m-%d %H:%M") -> str:
 
 
 def action_badge(action: str) -> str:
-    color = ACTION_COLORS.get(action, "#6b7280")
+    color = ACTION_COLORS.get(action, MUTED)
+    label, _ = action_label(action)
     return (
-        f'<span style="background:{color};color:#fff;padding:2px 10px;'
-        f'border-radius:12px;font-size:0.8rem;white-space:nowrap;">{action}</span>'
+        f'<span style="background:{color};color:#0b1220;padding:2px 10px;'
+        f'border-radius:12px;font-size:0.8rem;font-weight:700;'
+        f'white-space:nowrap;">{label}</span>'
     )
 
 
@@ -171,9 +201,12 @@ def answer_row(answer) -> str:
             "</div>"
         )
 
-    # choice: 上位2件の選択肢と確率
+    # choice: 上位2件の選択肢と確率。行動は画面用の文言に直す
     tops = answer.top_probabilities(2)
-    parts = "　".join(f"{name} {prob:.0%}" for name, prob in tops)
+    parts = "　".join(
+        f"{action_label(name)[0] if answer.key == 'action' else name} {prob:.0%}"
+        for name, prob in tops
+    )
     return (
         f'<div style="display:flex;align-items:center;gap:8px;margin:3px 0;">'
         f'<div style="width:120px;font-size:0.85rem;">{answer.label}</div>'
@@ -476,17 +509,27 @@ def render_conclusion(thresholds: dict) -> None:
     if top is None:
         background, border, text = BANNER_NONE
         headline = "関係する情報はまだありません"
+        headline_sub = ""
         sub = (
             f"「この地域に関係する」が {thresholds['relevance']:.2f} 以上の電文が"
             "まだ判定されていません。"
         )
     else:
         background, border, text = ACTION_BANNER.get(top.action, BANNER_NONE)
-        headline = top.action or "判定中"
+        headline, headline_sub = action_label(top.action)
         sub = (
             f"{top.title or top.kind}　|　{top.author}　|　"
             f"{jst_time(top.updated, '%m月%d日 %H:%M')} JST"
         )
+
+    # 副題(警戒レベル相当)。該当が無いときは出さない
+    subtitle = (
+        f'<div style="font-size:0.72rem;font-weight:600;letter-spacing:0.04em;'
+        f'color:{text};opacity:0.62;margin-top:3px;" title="{ALERT_LEVEL_NOTE}">'
+        f"{headline_sub}</div>"
+        if headline_sub
+        else ""
+    )
 
     # 結論と補足指標を横一列に並べる。結論の右が空くのを避け、
     # 関連度マップをスクロールなしで見える位置まで押し上げるため。
@@ -498,6 +541,7 @@ def render_conclusion(thresholds: dict) -> None:
         f"いま取るべき行動</div>"
         f'<div style="font-size:1.7rem;font-weight:700;line-height:1.2;color:{text};'
         f'margin-top:2px;">{headline}</div>'
+        f"{subtitle}"
         f'<div style="font-size:0.75rem;color:{text};opacity:0.85;margin-top:4px;'
         f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{sub}</div>'
         "</div>"
@@ -620,7 +664,7 @@ def render_ticker(thresholds: dict) -> None:
         f'<span class="who">{judged.author}</span>'
         f'<span class="rel" style="color:{relevance_color};">'
         f"関連度 {judged.relevance:.2f}</span>"
-        f'<span class="act" style="color:{action_color};">{judged.action}</span>'
+        f'<span class="act" style="color:{action_color};">{action_label(judged.action)[0]}</span>'
         f'<span class="ms">{judged.latency_ms:.0f}ms</span>'
         f'<span class="q">{judged.question_count}問</span>'
         "</div>",
@@ -794,7 +838,7 @@ def render_stream(thresholds: dict) -> None:
             f'<div style="width:110px;display:flex;align-items:center;gap:6px;">'
             f"{bar(judged.relevance, '#38bdf8', 60)}"
             f'<span style="font-size:0.78rem;">{judged.relevance:.2f}</span></div>'
-            f'<div style="width:120px;color:{color};">{judged.action}</div>'
+            f'<div style="width:120px;color:{color};">{action_label(judged.action)[0]}</div>'
             f'<div style="width:70px;text-align:right;color:{MUTED};">'
             f"{judged.latency_ms:.0f}ms</div>"
             "</div>"

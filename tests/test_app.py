@@ -388,3 +388,76 @@ def test_開始時刻の選択肢は30分刻みの48個():
     source = pathlib.Path("app/streamlit_app.py").read_text(encoding="utf-8")
     assert "REPLAY_START_TIMES" in source
     assert '"開始時刻"' in source
+
+
+# ---------------------------------------------------------------- 行動の表示名
+
+
+def test_行動の表示名は呼びかけと副題の組で返る():
+    from app.streamlit_app import ACTION_LABELS, action_label
+
+    call, subtitle = action_label("今日中に備える")
+    assert call == "早めの備えを"
+    assert subtitle == "警戒レベル2 相当"
+
+    # 5段階すべてに表示名がある
+    assert len(ACTION_LABELS) == 5
+    for action, (ja, sub) in ACTION_LABELS.items():
+        assert ja and sub
+
+
+def test_警戒レベルの副題には必ず相当を付ける():
+    """警戒レベルは地域に対して行政と気象庁が出すもの。
+
+    ここで出しているのは「この人の事情を踏まえた個人の行動」なので別物で、
+    言い切ると避難指示などの発令と取り違えられる。
+    """
+    from app.streamlit_app import ACTION_LABELS, ALERT_LEVEL_NOTE
+
+    for action, (_, subtitle) in ACTION_LABELS.items():
+        if "警戒レベル" in subtitle:
+            assert subtitle.endswith("相当"), f"{action}: {subtitle}"
+
+    # 発令そのものではないと断る注記がある
+    assert "発令" in ALERT_LEVEL_NOTE
+
+    # 段階が重くなるほどレベルが上がる
+    levels = [
+        ACTION_LABELS[a][1]
+        for a in ("予定変更を検討", "今日中に備える", "外出を控える", "早めの避難を検討")
+    ]
+    assert levels == [
+        "警戒レベル1 相当",
+        "警戒レベル2 相当",
+        "警戒レベル3 相当",
+        "警戒レベル4 相当",
+    ]
+
+
+def test_Jevに渡す選択肢名は変えていない():
+    """表示名を変えても、保存済みの判定結果がそのまま使えること。
+
+    選択肢の名前(criteria のキー)を変えると、過去の判定と食い違って
+    色が付かなくなり、揃えるには全件を判定し直すことになる。
+    """
+    from app.streamlit_app import ACTION_COLORS, ACTION_LABELS
+    from core.questions import by_key
+
+    criteria = set(by_key("action").question.criteria)
+    assert criteria == {
+        "通常どおり",
+        "予定変更を検討",
+        "今日中に備える",
+        "外出を控える",
+        "早めの避難を検討",
+    }
+    # 表示名と色は、どちらも選択肢名を鍵にしている
+    assert set(ACTION_LABELS) == criteria
+    assert set(ACTION_COLORS) == criteria
+
+
+def test_知らない行動でも落ちない():
+    from app.streamlit_app import action_label
+
+    assert action_label("未知の行動") == ("未知の行動", "")
+    assert action_label("") == ("判定中", "")
