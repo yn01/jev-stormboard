@@ -471,9 +471,9 @@ def test_アプリ名が画面とドキュメントで揃っている():
 
     from app.streamlit_app import APP_TITLE, TAB_TITLE
 
-    assert APP_TITLE == "東京の防災電文、Jevで判定してみた"
-    # タブは幅が狭いので短いほうを使う
-    assert len(TAB_TITLE) < len(APP_TITLE)
+    assert APP_TITLE == "東京の防災電文 × Jev"
+    # 画面のヘッダーとブラウザのタブで同じ名前を使う
+    assert TAB_TITLE == APP_TITLE
 
     for name in ("README.md", "requirements.md", "CLAUDE.md"):
         text = pathlib.Path(name).read_text(encoding="utf-8")
